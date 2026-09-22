@@ -7,6 +7,8 @@ services:
       OLLAMA_BASE_URL: http://ollama:11434
       VETAI_OLLAMA_MODEL: ${VETAI_OLLAMA_MODEL:-llama3:latest}
       VETAI_OLLAMA_TIMEOUT_SECONDS: ${VETAI_OLLAMA_TIMEOUT_SECONDS:-60}
+      VETAI_SEARCH_TIMEOUT_SECONDS: ${VETAI_SEARCH_TIMEOUT_SECONDS:-12}
+      VETAI_SEARCH_REGION: ${VETAI_SEARCH_REGION:-uk-en}
     depends_on:
       ollama:
         condition: service_started

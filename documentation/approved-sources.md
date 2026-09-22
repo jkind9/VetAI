@@ -18,8 +18,10 @@ other in the same change.
 
 ## Enforcement rules
 
-1. Generated search queries are augmented with approved-domain filters for relevance.
-2. Domain text inside a query is not trusted as enforcement.
+1. The allowlist limits retrieval up front: generated queries are scoped to the approved domains
+   before the external search call.
+2. Domain text inside a query is still not trusted as enforcement; search providers can ignore or
+   imperfectly honour operators.
 3. Every result must use HTTPS.
 4. A result host must equal an approved domain or be its subdomain. Substring matches do not count:
    `aspca.org.example.com` is not approved.

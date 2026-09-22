@@ -7,7 +7,6 @@ import pytest
 from backend.schemas import (
     AdaptiveDecision,
     AssessmentDraft,
-    GroundedItem,
     Message,
     ModelOutputError,
     SearchPlan,

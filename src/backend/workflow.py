@@ -1,99 +1,90 @@
-"""The rules for one turn of the pet-concern question flow.
-
-`run_turn` is the whole policy, top to bottom: reject malformed history, return the fixed
-emergency notice if a curated warning phrase appears in the owner's own words, otherwise make
-exactly one model call and check what comes back. Every decision about *what happens* is here.
-`model.py` only knows how to phrase a request to a provider; `safeguards.py` only knows which
-phrases are warning signs.
-
-Nothing in this module writes clinical content. The two fixed strings below and the model's own
-text are all the owner ever sees.
-"""
+"""Emergency-first state machine for the bounded multi-chain conversation."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypeVar
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
+from backend.questions import STANDARD_QUESTIONS, next_standard_question
 from backend.safeguards import find_emergency
 from backend.schemas import (
-    MAX_FOLLOW_UP_QUESTIONS,
-    MAX_HISTORY_MESSAGES,
+    MAX_ADAPTIVE_QUESTIONS,
+    STANDARD_QUESTION_COUNT,
+    AdaptiveDecision,
+    Assessment,
+    AssessmentDraft,
+    EvidenceItem,
     InvalidTurnRequest,
     Message,
-    Mode,
     ModelOutputError,
-    ModelReply,
+    QuestionMode,
     Role,
+    SearchPlan,
+    SourceCitation,
     TurnRequest,
     TurnResult,
 )
-
-# The workflow supplies this wording, never the model. Both are quoted word for word in
-# documentation/test-cases.md and asserted by the tests, so they have exactly one definition.
 
 EMERGENCY_NOTICE = (
     "This may be an emergency. Please contact an emergency veterinarian now. "
     "This demo cannot assess your pet or provide a diagnosis."
 )
 
-SUMMARY_SUFFIX = (
+ASSESSMENT_SUFFIX = (
     "This is not a diagnosis. Please discuss your pet's concern with a veterinarian."
 )
 
+TModel = TypeVar("TModel", bound=BaseModel)
 
-def run_turn(turn: TurnRequest, model: Any) -> TurnResult:
-    """Produce the reply for one turn.
 
-    `model` is anything with a `propose(turn, mode)` method: `OllamaChatModel` in `model.py`,
-    or the stand-in in the tests. This module imports nothing from `model.py`, so neither
-    the workflow nor its tests ever load LangChain.
-
-    Raises `InvalidTurnRequest` if the caller's history is malformed, or `ModelOutputError` if
-    the model call fails or its answer is unusable. It never substitutes text of its own for a
-    failed call.
-    """
+def run_turn(turn: TurnRequest, chains: Any, searcher: Any) -> TurnResult:
+    """Advance one safe state using deterministic policy around three model chains."""
     _validate_history(turn.history)
 
     emergency = find_emergency(_owner_written_text(turn))
     if emergency is not None:
-        # Fixed wording and no model call, so nothing can soften or reword an escalation.
         return TurnResult(
-            kind="emergency_notice", reply=EMERGENCY_NOTICE, emergency_rule=emergency.rule
+            kind="emergency_notice",
+            reply=EMERGENCY_NOTICE,
+            emergency_rule=emergency.rule,
         )
 
-    questions_already_asked = sum(1 for message in turn.history if message.role == "assistant")
-    may_ask_another = questions_already_asked < MAX_FOLLOW_UP_QUESTIONS
-    mode: Mode = "ordinary" if may_ask_another else "summary_only"
-
-    reply = _ask_model(model, turn, mode)
-
-    if reply.kind == "question" and not may_ask_another:
-        # The prompt asks for a recap in this mode, but the cap is enforced here so it does not
-        # depend on the model co-operating.
-        raise ModelOutputError(
-            "question_limit_violation",
-            f"the model asked another question after {MAX_FOLLOW_UP_QUESTIONS} already",
+    completed_pairs = len(turn.history) // 2
+    standard = next_standard_question(completed_pairs)
+    if standard is not None:
+        return TurnResult(
+            kind="question",
+            reply=standard.text,
+            question_type="standard",
+            question_id=standard.id,
         )
 
-    if reply.kind == "summary":
-        return TurnResult(kind="summary", reply=f"{reply.reply}\n\n{SUMMARY_SUFFIX}")
-    return TurnResult(kind="question", reply=reply.reply)
+    adaptive_count = completed_pairs - STANDARD_QUESTION_COUNT
+    if adaptive_count < MAX_ADAPTIVE_QUESTIONS:
+        mode: QuestionMode = (
+            "question_required" if adaptive_count == 0 else "question_or_ready"
+        )
+        raw_decision = _call_stage(
+            "adaptive_question", chains.propose_adaptive_question, turn, mode
+        )
+        decision = _validate_chain_output(
+            AdaptiveDecision, raw_decision, stage="adaptive_question"
+        )
+        if decision.kind == "question":
+            return TurnResult(
+                kind="question",
+                reply=decision.question,
+                question_type="adaptive",
+            )
+        if adaptive_count == 0:
+            raise ModelOutputError("question_required", stage="adaptive_question")
+
+    return _build_assessment(turn, chains, searcher)
 
 
 def _validate_history(history: list[Message]) -> None:
-    """Accept zero, one, or two complete question-and-answer pairs, and nothing else.
-
-    Malformed history is rejected rather than trimmed, because the number of assistant messages
-    in it *is* the follow-up count that `run_turn` caps. A summary or emergency notice ends the
-    chat and is never sent back, so neither appears here.
-    """
-    if len(history) > MAX_HISTORY_MESSAGES:
-        raise InvalidTurnRequest(
-            f"chat history holds at most {MAX_HISTORY_MESSAGES} messages, got {len(history)}"
-        )
-    if len(history) % 2 != 0:
+    if len(history) % 2:
         raise InvalidTurnRequest(
             "chat history must end with the owner's answer to the last question"
         )
@@ -101,44 +92,112 @@ def _validate_history(history: list[Message]) -> None:
         expected: Role = "assistant" if index % 2 == 0 else "user"
         if message.role != expected:
             raise InvalidTurnRequest(
-                f"chat history message {index} should be from the {expected}, "
-                f"got {message.role!r}"
+                f"chat history message {index} should be from the {expected}"
+            )
+
+    completed_pairs = len(history) // 2
+    for pair_index in range(min(completed_pairs, STANDARD_QUESTION_COUNT)):
+        actual = history[pair_index * 2].content
+        expected = STANDARD_QUESTIONS[pair_index].text
+        if actual != expected:
+            raise InvalidTurnRequest(
+                f"standard question {pair_index + 1} does not match the catalog"
             )
 
 
 def _owner_written_text(turn: TurnRequest) -> list[str]:
-    """Everything in this chat the owner wrote: the concern, the duration box, every answer.
-
-    All of it is re-read on every turn, so a warning sign reported earlier still counts later.
-    Assistant questions are left out on purpose: "Is she struggling to breathe?" is the demo's own
-    wording, and answering "No" to it must not escalate the chat.
-    """
-    texts = [turn.intake.concern]
-    if turn.intake.duration != "unknown":
-        texts.append(turn.intake.duration)
-    texts.extend(message.content for message in turn.history if message.role == "user")
-    return texts
+    return [turn.intake.concern] + [
+        message.content for message in turn.history if message.role == "user"
+    ]
 
 
-def _ask_model(model: Any, turn: TurnRequest, mode: Mode) -> ModelReply:
-    """Make the single model call for this turn and return an answer that fits `ModelReply`.
+def _build_assessment(turn: TurnRequest, chains: Any, searcher: Any) -> TurnResult:
+    raw_plan = _call_stage("search_query", chains.generate_search_plan, turn)
+    plan = _validate_chain_output(SearchPlan, raw_plan, stage="search_query")
 
-    One turn, one call: there is no retry, and no fallback text. Anything a provider raises
-    becomes a `ModelOutputError` so callers never see a LangChain or HTTP exception. Structure is
-    all that is checked here — whether a reply is relevant, factual, or medically sensible is a
-    prompt and human-review question, not something this code can decide.
-    """
     try:
-        raw = model.propose(turn, mode)
+        evidence = searcher.search(plan)
     except ModelOutputError:
-        raise  # the adapter recognised its own failure (timeout, connection) and said so
-    except Exception as error:  # noqa: BLE001 - re-raised below, never swallowed
-        raise ModelOutputError("model_call_failed", type(error).__name__) from error
+        raise
+    except Exception as error:  # search implementations must not leak provider exceptions
+        raise ModelOutputError(
+            "search_failed", type(error).__name__, stage="approved_source_search"
+        ) from error
+    if not evidence:
+        raise ModelOutputError(
+            "insufficient_evidence", stage="approved_source_search"
+        )
 
+    raw_draft = _call_stage(
+        "evidence_synthesis", chains.synthesise_assessment, turn, evidence
+    )
+    draft = _validate_chain_output(
+        AssessmentDraft, raw_draft, stage="evidence_synthesis"
+    )
+    assessment = _ground_assessment(draft, evidence)
+    return TurnResult(kind="assessment", assessment=assessment)
+
+
+def _call_stage(stage: str, function: Any, *args: Any) -> Any:
     try:
-        return ModelReply.model_validate(raw)
+        return function(*args)
+    except ModelOutputError:
+        raise
+    except Exception as error:
+        raise ModelOutputError(
+            "model_call_failed", type(error).__name__, stage=stage
+        ) from error
+
+
+def _validate_chain_output(
+    model: type[TModel], raw: Any, *, stage: str
+) -> TModel:
+    try:
+        return model.model_validate(raw)
     except ValidationError as error:
         raise ModelOutputError(
             "invalid_model_output",
             str(error.errors(include_url=False, include_input=False)),
+            stage=stage,
         ) from error
+
+
+def _ground_assessment(
+    draft: AssessmentDraft, evidence: list[EvidenceItem]
+) -> Assessment:
+    evidence_by_id = {item.source_id: item for item in evidence}
+    referenced_ids: set[str] = set()
+    for collection in (
+        draft.possible_areas,
+        draft.useful_observations,
+        draft.questions_for_veterinarian,
+    ):
+        for grounded in collection:
+            referenced_ids.update(grounded.source_ids)
+
+    unknown = referenced_ids.difference(evidence_by_id)
+    if unknown:
+        raise ModelOutputError(
+            "ungrounded_synthesis",
+            f"unknown source IDs: {sorted(unknown)}",
+            stage="evidence_synthesis",
+        )
+
+    sources = [
+        SourceCitation(
+            source_id=item.source_id,
+            title=item.title,
+            url=item.url,
+            organisation=item.organisation,
+        )
+        for item in evidence
+        if item.source_id in referenced_ids
+    ]
+    return Assessment(
+        what_you_reported=draft.what_you_reported,
+        possible_areas=draft.possible_areas,
+        useful_observations=draft.useful_observations,
+        questions_for_veterinarian=draft.questions_for_veterinarian,
+        sources=sources,
+        disclaimer=ASSESSMENT_SUFFIX,
+    )

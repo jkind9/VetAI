@@ -84,7 +84,11 @@ class FakeChains:
         self.adaptive_replies = list(
             adaptive
             if adaptive is not None
-            else [AdaptiveDecision(kind="question", question="What other changes have you noticed?")]
+            else [
+                AdaptiveDecision(
+                    kind="question", question="What other changes have you noticed?"
+                )
+            ]
         )
         self.plan_replies = list(
             plans if plans is not None else [SearchPlan(queries=["dog ear scratching veterinary"])]

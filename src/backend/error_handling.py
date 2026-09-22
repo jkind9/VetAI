@@ -46,7 +46,7 @@ async def invalid_turn_request(request: Request, error: InvalidTurnRequest) -> J
     if "must end" in message:
         issue = "Chat history must end with the owner's answer to the last question."
     elif "at most" in message:
-        issue = "Chat history can contain at most four messages."
+        issue = "Chat history can contain at most twelve messages."
     else:
         issue = "Chat history messages must alternate from the assistant and owner."
 
@@ -57,8 +57,8 @@ async def invalid_turn_request(request: Request, error: InvalidTurnRequest) -> J
 
 
 async def model_output_error(request: Request, error: ModelOutputError) -> JSONResponse:
-    """Hide every model/provider failure behind the shared 503 response."""
-    logger.warning("Chat model response rejected: %s", error.reason)
+    """Hide every model/search/grounding failure behind the shared 503 response."""
+    logger.warning("Chat stage rejected: stage=%s reason=%s", error.stage, error.reason)
     return handle_failure(503)
 
 

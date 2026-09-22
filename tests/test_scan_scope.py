@@ -1,8 +1,8 @@
 """The emergency gate sees all and only owner-authored text."""
 
+from backend.questions import STANDARD_QUESTIONS
 from backend.schemas import AdaptiveDecision, TurnRequest
 from backend.workflow import run_turn
-from backend.questions import STANDARD_QUESTIONS
 from conftest import FakeChains, FakeSearcher, history, intake, ready_history
 
 

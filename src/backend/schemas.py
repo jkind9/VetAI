@@ -1,135 +1,162 @@
-"""The shapes a turn is made of, and the two ways one can fail.
-
-Nothing here decides anything. These are the values that cross the backend's edges: what the
-caller may send, what a model may answer, what the backend returns, and how long each piece of
-text may be. The rules that use them live in `workflow.py`.
-
-This module imports nothing from the project and nothing from LangChain, so the workflow and its
-tests can run without a model library installed.
-"""
+"""Validated values crossing the workflow, model, search, and HTTP boundaries."""
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
-# How much a turn may contain. The follow-up cap is enforced in `workflow.py`; the character
-# limits bound what a caller may send and what a model may answer.
+from backend.questions import StandardQuestionId
 
-MAX_FOLLOW_UP_QUESTIONS = 2
-MAX_HISTORY_MESSAGES = MAX_FOLLOW_UP_QUESTIONS * 2  # each question plus the owner's answer
+STANDARD_QUESTION_COUNT = 3
+MIN_ADAPTIVE_QUESTIONS = 1
+MAX_ADAPTIVE_QUESTIONS = 3
+MAX_QUESTION_PAIRS = STANDARD_QUESTION_COUNT + MAX_ADAPTIVE_QUESTIONS
+MAX_HISTORY_MESSAGES = MAX_QUESTION_PAIRS * 2
 MAX_CONCERN_CHARS = 1000
-MAX_DURATION_CHARS = 100
 MAX_MESSAGE_CHARS = 1000
-MAX_REPLY_CHARS = 1200  # the model's own text, before the workflow appends the fixed suffix
+MAX_QUESTION_CHARS = 500
+MAX_SEARCH_QUERY_CHARS = 120
+MAX_EVIDENCE_CHARS = 4000
+MAX_SECTION_ITEM_CHARS = 500
 
 Species = Literal["dog", "cat"]
-YesNoUnknown = Literal["yes", "no", "unknown"]
-SymptomPattern = Literal["constant", "intermittent", "unknown"]
 Role = Literal["assistant", "user"]
-TurnKind = Literal["question", "summary", "emergency_notice"]
-
-# What the workflow asks the model for. `summary_only` means the follow-up cap is spent, so a
-# question is no longer an acceptable answer.
-Mode = Literal["ordinary", "summary_only"]
-
-# Why a turn could not produce a reply. Only the first is the model answering unusably; the rest
-# are the call itself failing or the workflow refusing what came back.
+QuestionMode = Literal["question_required", "question_or_ready"]
+QuestionType = Literal["standard", "adaptive"]
+TurnKind = Literal["question", "assessment", "emergency_notice"]
 FailureReason = Literal[
     "invalid_model_output",
-    "question_limit_violation",
+    "question_required",
     "model_call_failed",
     "timeout",
     "connection",
+    "unsafe_search_query",
+    "search_failed",
+    "insufficient_evidence",
+    "ungrounded_synthesis",
 ]
 
 
 class InvalidTurnRequest(ValueError):
-    """The caller sent intake or history the backend will not process.
-
-    A planned HTTP layer maps this to 422. History is rejected rather than shortened, because its
-    length is what the follow-up cap counts.
-    """
+    """The caller supplied a history sequence the workflow cannot trust."""
 
 
 class ModelOutputError(RuntimeError):
-    """The model call failed, or its answer cannot be used.
+    """A named model, query, retrieval, or grounding stage failed safely."""
 
-    The HTTP layer maps this to one generic 503 response. `reason` and `parse_failure` are for
-    backend logs or later tracking only.
-    """
-
-    def __init__(self, reason: FailureReason, detail: str = "") -> None:
-        super().__init__(f"{reason}: {detail}" if detail else reason)
+    def __init__(self, reason: FailureReason, detail: str = "", *, stage: str = "workflow") -> None:
+        super().__init__(f"{stage}:{reason}: {detail}" if detail else f"{stage}:{reason}")
         self.reason: FailureReason = reason
         self.detail = detail
+        self.stage = stage
 
     @property
     def parse_failure(self) -> bool:
-        """True when the model answered but the answer did not fit `ModelReply`.
-
-        Derived from `reason` rather than passed in separately, so the two can never disagree.
-        """
-        return self.reason == "invalid_model_output"
+        return self.reason in {"invalid_model_output", "ungrounded_synthesis"}
 
 
 class Intake(BaseModel):
-    """The structured form the owner fills in before the chat starts."""
-
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, frozen=True)
 
     species: Species
-    # Stripping happens before the length check, so a whitespace-only concern is rejected here.
     concern: str = Field(min_length=1, max_length=MAX_CONCERN_CHARS)
-    duration: str = Field(default="unknown", max_length=MAX_DURATION_CHARS)
-    previous_occurrence: YesNoUnknown = "unknown"
-    pattern: SymptomPattern = "unknown"
-
-    @field_validator("duration")
-    @classmethod
-    def _blank_duration_means_unknown(cls, value: str) -> str:
-        return value or "unknown"
 
 
 class Message(BaseModel):
-    """One message in the current chat: an assistant question or the owner's answer."""
-
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, frozen=True)
 
     role: Role
     content: str = Field(min_length=1, max_length=MAX_MESSAGE_CHARS)
 
-class ModelReply(BaseModel):
-    """The only shape a model may answer with.
-
-    `emergency_notice` is deliberately absent: the workflow takes that route before any model
-    call, so a model cannot put the backend on it.
-    """
-
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, frozen=True)
-
-    kind: Literal["question", "summary"]
-    reply: str = Field(min_length=1, max_length=MAX_REPLY_CHARS)
 
 class TurnRequest(BaseModel):
-    """One turn: the intake form plus the complete current chat so far."""
-
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     intake: Intake
-    history: list[Message] = Field(default_factory=list)
+    history: list[Message] = Field(default_factory=list, max_length=MAX_HISTORY_MESSAGES)
+
+
+class AdaptiveDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, frozen=True)
+
+    kind: Literal["question", "ready_for_search"]
+    question: str | None = Field(default=None, min_length=1, max_length=MAX_QUESTION_CHARS)
+
+    @model_validator(mode="after")
+    def _question_matches_kind(self) -> AdaptiveDecision:
+        if self.kind == "question" and self.question is None:
+            raise ValueError("question text is required for a question decision")
+        if self.kind == "ready_for_search" and self.question is not None:
+            raise ValueError("ready_for_search cannot include question text")
+        return self
+
+
+SearchQuery = Annotated[str, Field(min_length=3, max_length=MAX_SEARCH_QUERY_CHARS)]
+
+
+class SearchPlan(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, frozen=True)
+
+    queries: list[SearchQuery] = Field(min_length=1, max_length=3)
+
+
+class EvidenceItem(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, frozen=True)
+
+    source_id: str = Field(pattern=r"^S[1-9][0-9]*$")
+    title: str = Field(min_length=1, max_length=300)
+    url: HttpUrl
+    organisation: str = Field(min_length=1, max_length=200)
+    excerpt: str = Field(min_length=1, max_length=MAX_EVIDENCE_CHARS)
+
+
+class GroundedItem(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, frozen=True)
+
+    text: str = Field(min_length=1, max_length=MAX_SECTION_ITEM_CHARS)
+    source_ids: list[str] = Field(min_length=1, max_length=4)
+
+
+class AssessmentDraft(BaseModel):
+    """What the synthesis chain may write; it cannot supply titles or URLs."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, frozen=True)
+
+    what_you_reported: list[Annotated[str, Field(min_length=1, max_length=500)]] = Field(
+        min_length=1, max_length=5
+    )
+    possible_areas: list[GroundedItem] = Field(min_length=1, max_length=3)
+    useful_observations: list[GroundedItem] = Field(min_length=1, max_length=4)
+    questions_for_veterinarian: list[GroundedItem] = Field(min_length=1, max_length=3)
+
+
+class SourceCitation(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, frozen=True)
+
+    source_id: str
+    title: str
+    url: HttpUrl
+    organisation: str
+
+
+class Assessment(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    what_you_reported: list[str]
+    possible_areas: list[GroundedItem]
+    useful_observations: list[GroundedItem]
+    questions_for_veterinarian: list[GroundedItem]
+    sources: list[SourceCitation]
+    disclaimer: str
 
 
 class TurnResult(BaseModel):
-    """What the workflow returns for one turn.
-
-    `emergency_rule` names the phrase rule that fired, for a later tracking layer to record. It
-    is `None` on every other kind.
-    """
-
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     kind: TurnKind
-    reply: str
+    reply: str | None = None
+    question_type: QuestionType | None = None
+    question_id: StandardQuestionId | None = None
+    assessment: Assessment | None = None
     emergency_rule: str | None = None

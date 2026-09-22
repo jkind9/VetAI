@@ -16,6 +16,7 @@ RUN useradd --create-home --uid 10001 vetai
 COPY --from=builder /app/.venv /app/.venv
 COPY --chown=vetai:vetai src/backend ./src/backend
 COPY --chown=vetai:vetai prompts ./prompts
+COPY --chown=vetai:vetai config ./config
 
 ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONUNBUFFERED=1
