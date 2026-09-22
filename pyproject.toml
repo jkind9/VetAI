@@ -11,6 +11,10 @@ dependencies = [
     "uvicorn[standard]>=0.30",
 ]
 
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
 # The FastAPI backend is the base install. The native desktop client is optional so a backend
 # container does not carry GUI libraries. MLflow remains deferred until its tracking milestone.
 
@@ -28,9 +32,11 @@ dev = [
 ]
 
 [tool.uv]
-# There is nothing to build or install: the code is imported from src/ by pytest and by the
-# run commands in the README. uv still resolves and locks the dependencies above.
-package = false
+# Install the source-layout packages so the documented ``python -m frontend.app`` command works.
+package = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/backend", "src/frontend"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

@@ -7,6 +7,30 @@ owner-written text bypass the model and return a fixed emergency notice.
 This is not a veterinary product. It gives no diagnosis, treatment advice, or urgency rating. The
 phrase rules are deliberately narrow: they can miss emergencies or match misleading wording.
 
+## Quickstart
+
+Install [Ollama](https://ollama.com/) and download the default model once:
+
+```powershell
+ollama pull llama3:latest
+```
+
+Ollama's desktop app normally starts its local service. If it is not running, start `ollama serve`
+in a separate terminal and leave it open. Then, in two PowerShell terminals from this project
+folder, run:
+
+```powershell
+# Terminal 1: install dependencies and start the backend
+uv sync --locked --extra desktop
+uv run uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
+
+# Terminal 2: open the desktop chat
+uv run --extra desktop python -m frontend.app
+```
+
+Enter the pet's concern, select **Start chat**, and answer any follow-up questions. The desktop
+connects to `http://127.0.0.1:8000` by default.
+
 - [Technical-test brief](e071501d-5c3c-4368-9565-a0ba2b94ce0c_Tech_Test.pdf)
 - [Implementation plan](documentation/implementation-plan.md)
 - [Test cases and acceptable responses](documentation/test-cases.md)
@@ -32,7 +56,7 @@ them in separate PowerShell terminals:
 
 ```powershell
 # Terminal 1: FastAPI backend
-uv run uvicorn --app-dir src backend.app:app --host 127.0.0.1 --port 8000 --reload
+uv run uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
 
 # Terminal 2: native desktop client
 uv run --extra desktop python -m frontend.app
