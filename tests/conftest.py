@@ -52,12 +52,16 @@ def assessment_draft(
     return AssessmentDraft(
         outcome=outcome,
         what_you_reported=["Your dog has scratched one ear since this morning."],
-        possible_areas=[
-            GroundedItem(
-                text="A veterinarian may consider irritation or inflammation.",
-                source_ids=[source_id],
-            )
-        ],
+        possible_areas=(
+            [
+                GroundedItem(
+                    text="A veterinarian may consider irritation or inflammation.",
+                    source_ids=[source_id],
+                )
+            ]
+            if outcome == "possible_problem"
+            else []
+        ),
         suggested_actions=[
             GroundedItem(
                 text="Record when the episode happens and share the pattern with your veterinarian.",

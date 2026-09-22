@@ -30,12 +30,19 @@ HUMAN_MARKER = "<!-- human -->"
 
 MODE_INSTRUCTIONS: dict[QuestionMode, str] = {
     "question_required": (
-        "You must return kind `question` and ask exactly one useful question. "
-        "This is the first adaptive turn, so `ready_for_search` is not allowed."
+        "Return `urgent_escalation` if the owner-reported signs may need an emergency veterinarian "
+        "now. Otherwise return `question` and ask exactly one useful question. This is the first "
+        "adaptive turn, so `ready_for_search` is not allowed."
     ),
     "question_or_ready": (
-        "Return one useful question if an important descriptive detail is still missing. "
-        "Otherwise return kind `ready_for_search` with question set to null."
+        "Return `urgent_escalation` if the owner-reported signs may need an emergency veterinarian "
+        "now. Otherwise return one useful question if an important descriptive detail is still "
+        "missing, or `ready_for_search` with question set to null."
+    ),
+    "ready_or_escalate": (
+        "The question limit has been reached. Return `urgent_escalation` if the owner-reported "
+        "signs may need an emergency veterinarian now; otherwise return `ready_for_search`. Do not "
+        "ask another question."
     ),
 }
 

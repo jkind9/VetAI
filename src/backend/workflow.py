@@ -35,6 +35,16 @@ ASSESSMENT_SUFFIX = (
     "This is not a diagnosis. Please discuss your pet's concern with a veterinarian."
 )
 
+OUTCOME_WORDING = {
+    "possible_problem": (
+        "The information reviewed raised points to discuss with a veterinarian."
+    ),
+    "nothing_flagged": (
+        "This review did not flag a specific problem. This is not an all-clear; keep monitoring "
+        "your pet and contact a veterinarian if you remain concerned or the signs change."
+    ),
+}
+
 TModel = TypeVar("TModel", bound=BaseModel)
 
 
@@ -44,11 +54,7 @@ def run_turn(turn: TurnRequest, chains: Any, searcher: Any) -> TurnResult:
 
     emergency = find_emergency(_owner_written_text(turn))
     if emergency is not None:
-        return TurnResult(
-            kind="emergency_notice",
-            reply=EMERGENCY_NOTICE,
-            emergency_rule=emergency.rule,
-        )
+        return _emergency_result(emergency.rule)
 
     completed_pairs = len(turn.history) // 2
     standard = next_standard_question(completed_pairs)
@@ -61,26 +67,46 @@ def run_turn(turn: TurnRequest, chains: Any, searcher: Any) -> TurnResult:
         )
 
     adaptive_count = completed_pairs - STANDARD_QUESTION_COUNT
-    if adaptive_count < MAX_ADAPTIVE_QUESTIONS:
-        mode: QuestionMode = (
-            "question_required" if adaptive_count == 0 else "question_or_ready"
-        )
-        raw_decision = _call_stage(
-            "adaptive_question", chains.propose_adaptive_question, turn, mode
-        )
-        decision = _validate_chain_output(
-            AdaptiveDecision, raw_decision, stage="adaptive_question"
-        )
-        if decision.kind == "question":
-            return TurnResult(
-                kind="question",
-                reply=decision.question,
-                question_type="adaptive",
+    mode: QuestionMode
+    if adaptive_count == 0:
+        mode = "question_required"
+    elif adaptive_count < MAX_ADAPTIVE_QUESTIONS:
+        mode = "question_or_ready"
+    else:
+        mode = "ready_or_escalate"
+
+    raw_decision = _call_stage(
+        "adaptive_question", chains.propose_adaptive_question, turn, mode
+    )
+    decision = _validate_chain_output(
+        AdaptiveDecision, raw_decision, stage="adaptive_question"
+    )
+    if decision.kind == "urgent_escalation":
+        return _emergency_result("model_urgent_escalation")
+    if decision.kind == "question":
+        if mode == "ready_or_escalate":
+            raise ModelOutputError(
+                "invalid_model_output",
+                "adaptive question cap has been reached",
+                stage="adaptive_question",
             )
-        if adaptive_count == 0:
-            raise ModelOutputError("question_required", stage="adaptive_question")
+        return TurnResult(
+            kind="question",
+            reply=decision.question,
+            question_type="adaptive",
+        )
+    if adaptive_count == 0:
+        raise ModelOutputError("question_required", stage="adaptive_question")
 
     return _build_assessment(turn, chains, searcher)
+
+
+def _emergency_result(rule: str) -> TurnResult:
+    return TurnResult(
+        kind="emergency_notice",
+        reply=EMERGENCY_NOTICE,
+        emergency_rule=rule,
+    )
 
 
 def _validate_history(history: list[Message]) -> None:
@@ -169,7 +195,7 @@ def _ground_assessment(
     referenced_ids: set[str] = set()
     for collection in (
         draft.possible_areas,
-        draft.useful_observations,
+        draft.suggested_actions,
         draft.questions_for_veterinarian,
     ):
         for grounded in collection:
@@ -194,9 +220,11 @@ def _ground_assessment(
         if item.source_id in referenced_ids
     ]
     return Assessment(
+        outcome=draft.outcome,
+        outcome_wording=OUTCOME_WORDING[draft.outcome],
         what_you_reported=draft.what_you_reported,
         possible_areas=draft.possible_areas,
-        useful_observations=draft.useful_observations,
+        suggested_actions=draft.suggested_actions,
         questions_for_veterinarian=draft.questions_for_veterinarian,
         sources=sources,
         disclaimer=ASSESSMENT_SUFFIX,

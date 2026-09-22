@@ -22,9 +22,10 @@ MAX_SECTION_ITEM_CHARS = 500
 
 Species = Literal["dog", "cat"]
 Role = Literal["assistant", "user"]
-QuestionMode = Literal["question_required", "question_or_ready"]
+QuestionMode = Literal["question_required", "question_or_ready", "ready_or_escalate"]
 QuestionType = Literal["standard", "adaptive"]
 TurnKind = Literal["question", "assessment", "emergency_notice"]
+AssessmentOutcome = Literal["possible_problem", "nothing_flagged"]
 FailureReason = Literal[
     "invalid_model_output",
     "question_required",
@@ -80,15 +81,15 @@ class TurnRequest(BaseModel):
 class AdaptiveDecision(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, frozen=True)
 
-    kind: Literal["question", "ready_for_search"]
+    kind: Literal["question", "ready_for_search", "urgent_escalation"]
     question: str | None = Field(default=None, min_length=1, max_length=MAX_QUESTION_CHARS)
 
     @model_validator(mode="after")
     def _question_matches_kind(self) -> AdaptiveDecision:
         if self.kind == "question" and self.question is None:
             raise ValueError("question text is required for a question decision")
-        if self.kind == "ready_for_search" and self.question is not None:
-            raise ValueError("ready_for_search cannot include question text")
+        if self.kind != "question" and self.question is not None:
+            raise ValueError(f"{self.kind} cannot include question text")
         return self
 
 
@@ -123,12 +124,21 @@ class AssessmentDraft(BaseModel):
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, frozen=True)
 
+    outcome: AssessmentOutcome
     what_you_reported: list[Annotated[str, Field(min_length=1, max_length=500)]] = Field(
         min_length=1, max_length=5
     )
-    possible_areas: list[GroundedItem] = Field(min_length=1, max_length=3)
-    useful_observations: list[GroundedItem] = Field(min_length=1, max_length=4)
+    possible_areas: list[GroundedItem] = Field(max_length=3)
+    suggested_actions: list[GroundedItem] = Field(min_length=1, max_length=4)
     questions_for_veterinarian: list[GroundedItem] = Field(min_length=1, max_length=3)
+
+    @model_validator(mode="after")
+    def _possible_areas_match_outcome(self) -> AssessmentDraft:
+        if self.outcome == "possible_problem" and not self.possible_areas:
+            raise ValueError("possible_problem requires at least one possible area")
+        if self.outcome == "nothing_flagged" and self.possible_areas:
+            raise ValueError("nothing_flagged cannot include possible areas")
+        return self
 
 
 class SourceCitation(BaseModel):
@@ -143,9 +153,11 @@ class SourceCitation(BaseModel):
 class Assessment(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    outcome: AssessmentOutcome
+    outcome_wording: str
     what_you_reported: list[str]
     possible_areas: list[GroundedItem]
-    useful_observations: list[GroundedItem]
+    suggested_actions: list[GroundedItem]
     questions_for_veterinarian: list[GroundedItem]
     sources: list[SourceCitation]
     disclaimer: str

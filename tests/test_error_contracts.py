@@ -28,7 +28,12 @@ def _client(chains: Any, searcher: Any) -> TestClient:
 
 
 def _ready_request() -> dict[str, Any]:
-    return _request(history=[item.model_dump() for item in ready_history()])
+    return _request(
+        history=[
+            item.model_dump()
+            for item in ready_history(("Have you noticed any other changes?", "No"))
+        ]
+    )
 
 
 def _assert_service_error(response: Any, *, status_code: int = 503) -> None:
