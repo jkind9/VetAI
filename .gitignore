@@ -1,0 +1,25 @@
+# Local MLflow runs hold owner-entered text. Never commit them.
+mlruns/
+mlartifacts/
+
+# Environments and caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Local secrets and machine-specific settings
+.env
+.env.*
+!.env.example
+
+# Editor and OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Scratch space used while building; not part of the deliverable
+tmp/
+task_list/

@@ -1,0 +1,38 @@
+[project]
+name = "vetai-question-flow"
+version = "0.1.0"
+description = "Pet concern question flow demo: LangChain/Ollama question flow behind a deterministic safety gate"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.9",
+    "langchain-core>=0.3",
+    "langchain-ollama>=0.2",
+]
+
+# FastAPI, MLflow and PySide6 are added by the milestones that introduce them, so the
+# environment a reviewer installs stays as small as the code that exists.
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.7",
+]
+
+[tool.uv]
+# There is nothing to build or install: the code is imported from src/ by pytest and by the
+# run commands in the README. uv still resolves and locks the dependencies above.
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+markers = [
+    "ollama: needs a running local Ollama; skipped unless VETAI_RUN_OLLAMA_SMOKE=1",
+]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
