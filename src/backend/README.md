@@ -1,7 +1,7 @@
 # Backend core
 
-This folder is the decision-making core of the demo. The HTTP route, settings, and tracking layers
-are not written yet.
+This folder is the decision-making core of the demo. The HTTP boundary is implemented; settings
+and tracking are not written yet.
 
 | File | Owns |
 | --- | --- |
@@ -9,7 +9,9 @@ are not written yet.
 | `safeguards.py` | Which phrases count as a warning sign. Imports nothing from the project. |
 | `schemas.py` | The shapes a turn is made of, the length limits, and the two error types. Decides nothing. |
 | `model.py` | Everything provider-specific: the prompt file and the LangChain/Ollama adapter. |
-| `app.py`, `settings.py`, `tracking.py` | Not written yet: the HTTP route, configuration loading, and MLflow. |
+| `app.py` | Wires the FastAPI routes to the workflow and supplied model. |
+| `error_handling.py` | The public HTTP responses for request, model, and unexpected failures. |
+| `settings.py`, `tracking.py` | Not written yet: configuration loading and MLflow. |
 
 ## Backend design and conversation flow
 
@@ -21,10 +23,10 @@ a later response-validation block. It is not implemented and does not currently 
 flowchart TD
     caller["Start a conversation turn\npet details + current chat"]
     input["Check required fields, allowed values,\nand text limits"]
-    input_error["Stop: input error is raised\na future web endpoint returns 422"]
+    input_error["Stop: input error is raised\nthe HTTP boundary returns 422"]
 
     history["Check the chat is complete and in order\nup to two question-and-answer pairs"]
-    history_error["Stop: history error is raised\na future web endpoint returns 422"]
+    history_error["Stop: history error is raised\nthe HTTP boundary returns 422"]
 
     owner_text["Read the owner's concern, duration,\nand answers so far"]
     safety_gate{"Does the owner report\na listed urgent sign?"}
@@ -32,13 +34,13 @@ flowchart TD
 
     mode["Choose the response mode\nask only if fewer than two questions\nhave already been asked"]
     adapter["Ask the language model once\nfor a question or a summary"]
-    call_error["Stop: model error is raised\ntimeout, connection, or call failure\na future web endpoint returns 503"]
+    call_error["Stop: model error is raised\ntimeout, connection, or call failure\nthe HTTP boundary returns 503"]
     shape["Check that the reply has an allowed type,\nnon-blank text, and a safe length"]
-    shape_error["Stop: invalid model-reply error is raised\na future web endpoint returns 503"]
+    shape_error["Stop: invalid model-reply error is raised\nthe HTTP boundary returns 503"]
 
     future_validation["Future response checks\ncontent, grounding, and safety\nnot implemented yet"]
     question_cap{"Did it ask another question\nafter two were already asked?"}
-    cap_error["Stop: question-limit error is raised\na future web endpoint returns 503"]
+    cap_error["Stop: question-limit error is raised\nthe HTTP boundary returns 503"]
     question["Show the model's question"]
     summary["Show the model's summary\nwith the fixed disclaimer"]
 
@@ -81,11 +83,10 @@ model-written response. If the model times out, cannot be reached, raises anothe
 returns a reply with the wrong shape, the backend raises a `ModelOutputError` and stops the turn.
 It also raises one when the model tries to ask a third follow-up question.
 
-Invalid intake or chat history stops earlier with `InvalidTurnRequest`. The future HTTP layer is
-expected to turn invalid requests into a `422` response and model failures into a safe `503`
-service-error response. It has not been built yet, so today a Python caller receives the exception
-and must decide what to show the owner. The backend never shows an unvalidated model reply or
-silently substitutes reassurance after a failure.
+Invalid intake or chat history stops earlier with `InvalidTurnRequest`; the HTTP boundary turns
+these into `422` responses. It maps every `ModelOutputError` to the same safe `503` service-error
+body and unexpected application failures to the same safe body with `500`. The backend never shows
+an unvalidated model reply or silently substitutes reassurance after a failure.
 
 ## One turn, start to finish
 

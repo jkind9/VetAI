@@ -3,7 +3,8 @@
 This is the implementation contract for the next step: connect the existing backend workflow to
 `POST /v1/chat`, then add a small PySide6 chat so a person can send real turns to Ollama and inspect
 the result. The [backend README](../src/backend/README.md) describes the code that exists today;
-the HTTP route, desktop client, tracking, and model-response content safeguard are still planned.
+the HTTP route is implemented, while the desktop client, tracking, and model-response content
+safeguard are still planned.
 The [test cases](test-cases.md) provide the behavioural examples referred to below.
 
 ## Rules at the boundary
@@ -117,7 +118,8 @@ replaying the original response, and one tracking record per logical turn.
 
 | File | Work |
 | --- | --- |
-| `src/backend/app.py` | Implement `POST /v1/chat`, request/error handlers, fixed service text, and `GET /health`. Convert both kinds of `422` and all `ModelOutputError` reasons to the contracts above. |
+| `src/backend/app.py` | Implements `POST /v1/chat` and `GET /health`; it only wires routes to the workflow and supplied model. |
+| `src/backend/error_handling.py` | Owns the request/error handlers, fixed service text, and conversion of both kinds of `422` and all `ModelOutputError` reasons to the contracts above. |
 | `src/backend/schemas.py` | Reuse existing request, result, and error types; add a safeguard failure reason only when a response rule is actually implemented. Keep diagnostic reasons internal and correct the current `ModelOutputError` docstring, which says HTTP will report them. |
 | `src/backend/workflow.py` | Keep validation, emergency bypass, one model call, shape check, and question cap. Add future response checks after shape validation and before returning any model text. |
 | `src/backend/model.py` | Preserve one provider invocation and classify provider parse errors correctly. No fallback model call. |

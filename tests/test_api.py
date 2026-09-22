@@ -11,9 +11,10 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app import REQUEST_ERROR_TEXT, SERVICE_ERROR_TEXT, create_app
+from backend.app import create_app
+from backend.error_handling import REQUEST_ERROR_TEXT, SERVICE_ERROR_TEXT
 from backend.schemas import ModelOutputError
-from conftest import FakeChatModel, history, question, summary
+from conftest import FakeChatModel, question, summary
 
 
 def _request(
@@ -48,19 +49,82 @@ def test_invalid_request_data_has_a_field_issue_without_calling_the_model() -> N
     assert model.calls == []
 
 
-def test_invalid_history_has_a_history_issue_without_calling_the_model() -> None:
+@pytest.mark.parametrize(
+    ("request_body", "field", "message"),
+    [
+        (
+            {"intake": {"concern": "Ear scratching"}, "history": []},
+            "intake.species",
+            "Enter a valid value.",
+        ),
+        (
+            _request() | {"intake": _request()["intake"] | {"species": "rabbit"}},
+            "intake.species",
+            "Enter a valid value.",
+        ),
+        (_request(concern="x" * 1001), "intake.concern", "Enter a valid value."),
+        (
+            _request(history=[{"role": "assistant", "content": "x" * 1001}]),
+            "history",
+            "Correct the chat history and try again.",
+        ),
+    ],
+    ids=["missing_species", "unsupported_species", "overlong_concern", "overlong_history"],
+)
+def test_other_invalid_request_data_identifies_the_field(
+    request_body: dict[str, Any], field: str, message: str
+) -> None:
     model = FakeChatModel(question())
-    incomplete_history = [{"role": "assistant", "content": "When did it start?"}]
 
-    response = _client(model).post("/v1/chat", json=_request(history=incomplete_history))
+    response = _client(model).post("/v1/chat", json=request_body)
 
     assert response.status_code == 422
     assert response.json() == {
         "error": REQUEST_ERROR_TEXT,
-        "issues": [{
-            "field": "history",
-            "message": "Chat history must end with the owner's answer to the last question.",
-        }],
+        "issues": [{"field": field, "message": message}],
+    }
+    assert model.calls == []
+
+
+@pytest.mark.parametrize(
+    ("invalid_history", "message"),
+    [
+        (
+            [{"role": "assistant", "content": "When did it start?"}],
+            "Chat history must end with the owner's answer to the last question.",
+        ),
+        (
+            [
+                {"role": "user", "content": "Yesterday"},
+                {"role": "assistant", "content": "When did it start?"},
+            ],
+            "Chat history messages must alternate from the assistant and owner.",
+        ),
+        (
+            [
+                {"role": "assistant", "content": "Question one"},
+                {"role": "user", "content": "Answer one"},
+                {"role": "assistant", "content": "Question two"},
+                {"role": "user", "content": "Answer two"},
+                {"role": "assistant", "content": "Question three"},
+                {"role": "user", "content": "Answer three"},
+            ],
+            "Chat history can contain at most four messages.",
+        ),
+    ],
+    ids=["incomplete", "out_of_order", "too_long"],
+)
+def test_invalid_history_has_a_history_issue_without_calling_the_model(
+    invalid_history: list[dict[str, str]], message: str
+) -> None:
+    model = FakeChatModel(question())
+
+    response = _client(model).post("/v1/chat", json=_request(history=invalid_history))
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "error": REQUEST_ERROR_TEXT,
+        "issues": [{"field": "history", "message": message}],
     }
     assert model.calls == []
 

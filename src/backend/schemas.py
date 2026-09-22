@@ -56,7 +56,8 @@ class InvalidTurnRequest(ValueError):
 class ModelOutputError(RuntimeError):
     """The model call failed, or its answer cannot be used.
 
-    A planned HTTP layer maps this to 503 and reports `reason` and `parse_failure`.
+    The HTTP layer maps this to one generic 503 response. `reason` and `parse_failure` are for
+    backend logs or later tracking only.
     """
 
     def __init__(self, reason: FailureReason, detail: str = "") -> None:
