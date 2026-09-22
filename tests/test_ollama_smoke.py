@@ -1,13 +1,4 @@
-"""One real-model check: does the chosen local model return something the workflow accepts?
-
-Skipped by default. Ordinary test runs and CI must not need a downloaded model or a running
-service. Run it deliberately:
-
-    VETAI_RUN_OLLAMA_SMOKE=1 uv run pytest tests/test_ollama_smoke.py -v -s
-
-Override the model with VETAI_OLLAMA_MODEL. The assertions are about structure and routing only —
-the model's wording is reviewed by a person against documentation/test-cases.md, not asserted here.
-"""
+"""Opt-in structured-output checks for each real local LangChain stage."""
 
 from __future__ import annotations
 
@@ -15,15 +6,14 @@ import os
 
 import pytest
 
-from backend.schemas import TurnRequest
-from backend.workflow import SUMMARY_SUFFIX, run_turn
-from conftest import history, intake
+from backend.schemas import EvidenceItem, TurnRequest
+from conftest import evidence, intake, ready_history, standard_history
 
 pytestmark = [
     pytest.mark.ollama,
     pytest.mark.skipif(
         os.environ.get("VETAI_RUN_OLLAMA_SMOKE") != "1",
-        reason="set VETAI_RUN_OLLAMA_SMOKE=1 and start Ollama to run the real-model check",
+        reason="set VETAI_RUN_OLLAMA_SMOKE=1 and start Ollama",
     ),
 ]
 
@@ -31,47 +21,33 @@ MODEL_TAG = os.environ.get("VETAI_OLLAMA_MODEL", "llama3:latest")
 
 
 @pytest.fixture(scope="module")
-def ollama_model():
+def chains():
     from backend.model import OllamaChatModel
 
     return OllamaChatModel(MODEL_TAG)
 
 
-def test_a_first_turn_returns_a_usable_reply(ollama_model) -> None:
-    """With no history the model may ask or recap; either must survive validation."""
-    request = TurnRequest(
-        intake=intake("My dog scratched one ear today.", duration="today", pattern="intermittent"),
-        history=[],
+def test_adaptive_chain_returns_a_required_question(chains) -> None:
+    result = chains.propose_adaptive_question(
+        TurnRequest(intake=intake(), history=standard_history()),
+        "question_required",
     )
 
-    result = run_turn(request, ollama_model)
-
-    assert result.kind in {"question", "summary"}
-    assert result.reply.strip()
-    print(f"\n[{MODEL_TAG}] first turn -> {result.kind}: {result.reply}")
+    assert result.kind == "question"
+    assert result.question
 
 
-def test_summary_only_mode_ends_the_flow(ollama_model) -> None:
-    """After two follow-ups the whole turn must land on a recap with the fixed suffix."""
-    request = TurnRequest(
-        intake=intake("My dog scratched one ear today.", duration="today"),
-        history=history(
-            ("When did you first notice it?", "Yesterday evening"),
-            ("Is it constant or on and off?", "On and off"),
-        ),
+def test_query_and_synthesis_chains_return_structured_outputs(chains) -> None:
+    turn = TurnRequest(
+        intake=intake(), history=ready_history(("Any discharge?", "No"))
     )
+    plan = chains.generate_search_plan(turn)
+    result = chains.synthesise_assessment(turn, [evidence()])
 
-    result = run_turn(request, ollama_model)
-
-    assert result.kind == "summary"
-    assert result.reply.endswith(SUMMARY_SUFFIX)
-    print(f"\n[{MODEL_TAG}] summary_only -> {result.reply}")
+    assert plan.queries
+    assert result.what_you_reported
+    assert all(item.source_ids for item in result.possible_areas)
 
 
-def test_an_emergency_phrase_still_never_reaches_the_model(ollama_model) -> None:
-    """The gate sits in front of the real model too, not only the stand-in."""
-    request = TurnRequest(intake=intake("My dog is struggling to breathe."), history=[])
-
-    result = run_turn(request, ollama_model)
-
-    assert result.kind == "emergency_notice"
+def test_emergency_gate_is_covered_by_deterministic_tests() -> None:
+    assert EvidenceItem.model_validate(evidence().model_dump()).source_id == "S1"

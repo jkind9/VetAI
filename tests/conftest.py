@@ -1,22 +1,27 @@
-"""Shared test helpers.
-
-The stand-in model here is why an ordinary test run needs neither Ollama nor a network. It
-returns whatever it was given — including a deliberately malformed value — and records each call,
-so a test can assert both whether the model was asked at all and which mode it was asked for.
-"""
+"""Shared fakes for deterministic workflow, API, and desktop tests."""
 
 from __future__ import annotations
 
 import os
+from typing import Any
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
-from typing import Any
 
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from backend.schemas import Intake, Message, Mode, ModelReply, TurnRequest
+from backend.questions import STANDARD_QUESTIONS
+from backend.schemas import (
+    AdaptiveDecision,
+    AssessmentDraft,
+    EvidenceItem,
+    GroundedItem,
+    Intake,
+    Message,
+    QuestionMode,
+    SearchPlan,
+    TurnRequest,
+)
 
 
 @pytest.fixture(scope="session")
@@ -24,50 +29,152 @@ def qapplication() -> QApplication:
     return QApplication.instance() or QApplication([])
 
 
-class FakeChatModel:
-    """Returns one fixed answer, and remembers what it was asked.
-
-    `calls` holds the turns it was given and `modes` the mode of each, so a test can assert
-    both that the model was (or was not) asked and which mode the workflow chose.
-    """
-
-    def __init__(self, reply: Any) -> None:
-        self.reply = reply
-        self.calls: list[TurnRequest] = []
-        self.modes: list[Mode] = []
-
-    def propose(self, turn: TurnRequest, mode: Mode) -> Any:
-        self.calls.append(turn)
-        self.modes.append(mode)
-        return self.reply
-
-
-def question(text: str = "When did you first notice it?") -> ModelReply:
-    return ModelReply(kind="question", reply=text)
+def evidence(
+    source_id: str = "S1",
+    *,
+    title: str = "Ear concerns in dogs",
+    url: str = "https://vet.cornell.edu/example",
+    organisation: str = "Cornell University College of Veterinary Medicine",
+    excerpt: str = "Recording timing and visible changes can help a veterinarian.",
+) -> EvidenceItem:
+    return EvidenceItem(
+        source_id=source_id,
+        title=title,
+        url=url,
+        organisation=organisation,
+        excerpt=excerpt,
+    )
 
 
-def summary(text: str = "You reported that your dog scratched one ear today.") -> ModelReply:
-    return ModelReply(kind="summary", reply=text)
+def assessment_draft(source_id: str = "S1") -> AssessmentDraft:
+    return AssessmentDraft(
+        what_you_reported=["Your dog has scratched one ear since this morning."],
+        possible_areas=[
+            GroundedItem(
+                text="A veterinarian may consider irritation or inflammation.",
+                source_ids=[source_id],
+            )
+        ],
+        useful_observations=[
+            GroundedItem(
+                text="Note any visible change and when the scratching happens.",
+                source_ids=[source_id],
+            )
+        ],
+        questions_for_veterinarian=[
+            GroundedItem(
+                text="What changes would be most useful to monitor?",
+                source_ids=[source_id],
+            )
+        ],
+    )
+
+
+class FakeChains:
+    """Stage-aware stand-in whose queues make every chain invocation explicit."""
+
+    def __init__(
+        self,
+        *,
+        adaptive: list[Any] | None = None,
+        plans: list[Any] | None = None,
+        assessments: list[Any] | None = None,
+        events: list[str] | None = None,
+    ) -> None:
+        self.adaptive_replies = list(
+            adaptive
+            if adaptive is not None
+            else [AdaptiveDecision(kind="question", question="What other changes have you noticed?")]
+        )
+        self.plan_replies = list(
+            plans if plans is not None else [SearchPlan(queries=["dog ear scratching veterinary"])]
+        )
+        self.assessment_replies = list(
+            assessments if assessments is not None else [assessment_draft()]
+        )
+        self.adaptive_calls: list[tuple[TurnRequest, QuestionMode]] = []
+        self.plan_calls: list[TurnRequest] = []
+        self.synthesis_calls: list[tuple[TurnRequest, list[EvidenceItem]]] = []
+        self.events = events if events is not None else []
+
+    def propose_adaptive_question(self, turn: TurnRequest, mode: QuestionMode) -> Any:
+        self.events.append("adaptive")
+        self.adaptive_calls.append((turn, mode))
+        if not self.adaptive_replies:
+            raise AssertionError("unexpected adaptive-chain call")
+        reply = self.adaptive_replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    def generate_search_plan(self, turn: TurnRequest) -> Any:
+        self.events.append("plan")
+        self.plan_calls.append(turn)
+        if not self.plan_replies:
+            raise AssertionError("unexpected search-plan call")
+        reply = self.plan_replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    def synthesise_assessment(self, turn: TurnRequest, items: list[EvidenceItem]) -> Any:
+        self.events.append("synthesis")
+        self.synthesis_calls.append((turn, items))
+        if not self.assessment_replies:
+            raise AssertionError("unexpected synthesis call")
+        reply = self.assessment_replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+
+class FakeSearcher:
+    def __init__(
+        self,
+        results: list[EvidenceItem] | None = None,
+        *,
+        error: Exception | None = None,
+        events: list[str] | None = None,
+    ) -> None:
+        self.results = list(results if results is not None else [evidence()])
+        self.error = error
+        self.calls: list[SearchPlan] = []
+        self.events = events if events is not None else []
+
+    def search(self, plan: SearchPlan) -> list[EvidenceItem]:
+        self.events.append("search")
+        self.calls.append(plan)
+        if self.error is not None:
+            raise self.error
+        return list(self.results)
 
 
 def intake(concern: str = "My dog scratched one ear today.", **overrides: Any) -> Intake:
-    """Default intake from documentation/test-cases.md: dog, everything else unknown."""
-    fields: dict[str, Any] = {
-        "species": "dog",
-        "concern": concern,
-        "duration": "unknown",
-        "previous_occurrence": "unknown",
-        "pattern": "unknown",
-    }
+    fields: dict[str, Any] = {"species": "dog", "concern": concern}
     fields.update(overrides)
     return Intake(**fields)
 
 
 def history(*pairs: tuple[str, str]) -> list[Message]:
-    """Build an alternating assistant-question / owner-answer history."""
     messages: list[Message] = []
     for asked, answered in pairs:
-        messages.append(Message(role="assistant", content=asked))
-        messages.append(Message(role="user", content=answered))
+        messages.extend(
+            [Message(role="assistant", content=asked), Message(role="user", content=answered)]
+        )
     return messages
 
+
+def standard_history(
+    duration: str = "Since this morning",
+    previous: str = "No",
+    pattern: str = "It comes and goes",
+) -> list[Message]:
+    return history(
+        (STANDARD_QUESTIONS[0].text, duration),
+        (STANDARD_QUESTIONS[1].text, previous),
+        (STANDARD_QUESTIONS[2].text, pattern),
+    )
+
+
+def ready_history(*adaptive_pairs: tuple[str, str]) -> list[Message]:
+    return standard_history() + history(*adaptive_pairs)

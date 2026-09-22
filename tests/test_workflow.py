@@ -1,81 +1,127 @@
-"""The three behaviours the rest of the system is built around.
-
-Each maps to a case in documentation/test-cases.md: E1 (emergency bypass), O6 (a second
-follow-up is allowed), O5 and C3 (after two follow-ups only a recap is accepted).
-
-These assert on control flow, not on model prose: which route was taken, how many model calls
-happened, and what mode the workflow asked for.
-"""
+"""End-to-end policy tests for the deterministic and multi-chain stages."""
 
 from __future__ import annotations
 
 import pytest
 
-from backend.schemas import ModelOutputError, TurnRequest
-from backend.workflow import EMERGENCY_NOTICE, SUMMARY_SUFFIX, run_turn
-from conftest import FakeChatModel, history, intake, question, summary
+from backend.questions import STANDARD_QUESTIONS
+from backend.schemas import AdaptiveDecision, ModelOutputError, TurnRequest
+from backend.workflow import ASSESSMENT_SUFFIX, EMERGENCY_NOTICE, run_turn
+from conftest import FakeChains, FakeSearcher, history, intake, ready_history, standard_history
 
 
-def test_emergency_phrase_bypasses_the_model() -> None:
-    """E1: a curated warning phrase returns the fixed notice without consulting the model."""
-    model = FakeChatModel(question())
-    request = TurnRequest(intake=intake("My dog is struggling to breathe."), history=[])
+@pytest.mark.parametrize("completed", [0, 1, 2])
+def test_three_standard_questions_are_returned_without_model_or_search(completed: int) -> None:
+    chains = FakeChains()
+    searcher = FakeSearcher()
+    answers = ["Today", "No", "It comes and goes"]
+    pairs = [(STANDARD_QUESTIONS[i].text, answers[i]) for i in range(completed)]
 
-    result = run_turn(request, model)
+    result = run_turn(TurnRequest(intake=intake(), history=history(*pairs)), chains, searcher)
+
+    expected = STANDARD_QUESTIONS[completed]
+    assert result.kind == "question"
+    assert result.reply == expected.text
+    assert result.question_type == "standard"
+    assert result.question_id == expected.id
+    assert chains.adaptive_calls == []
+    assert chains.plan_calls == []
+    assert searcher.calls == []
+
+
+def test_the_first_adaptive_question_is_mandatory() -> None:
+    chains = FakeChains(adaptive=[AdaptiveDecision(kind="question", question="Any discharge?")])
+    searcher = FakeSearcher()
+
+    result = run_turn(
+        TurnRequest(intake=intake(), history=standard_history()), chains, searcher
+    )
+
+    assert result.kind == "question"
+    assert result.question_type == "adaptive"
+    assert result.reply == "Any discharge?"
+    assert chains.adaptive_calls[0][1] == "question_required"
+    assert searcher.calls == []
+
+
+def test_ready_after_one_adaptive_answer_runs_plan_search_then_synthesis() -> None:
+    events: list[str] = []
+    chains = FakeChains(
+        adaptive=[AdaptiveDecision(kind="ready_for_search")], events=events
+    )
+    searcher = FakeSearcher(events=events)
+    request = TurnRequest(
+        intake=intake(),
+        history=ready_history(("Have you noticed discharge?", "No")),
+    )
+
+    result = run_turn(request, chains, searcher)
+
+    assert events == ["adaptive", "plan", "search", "synthesis"]
+    assert chains.adaptive_calls[0][1] == "question_or_ready"
+    assert result.kind == "assessment"
+    assert result.assessment is not None
+    assert result.assessment.disclaimer == ASSESSMENT_SUFFIX
+    assert [source.source_id for source in result.assessment.sources] == ["S1"]
+
+
+def test_after_three_adaptive_answers_search_is_forced_without_another_question_call() -> None:
+    events: list[str] = []
+    chains = FakeChains(adaptive=[], events=events)
+    searcher = FakeSearcher(events=events)
+    request = TurnRequest(
+        intake=intake(),
+        history=ready_history(
+            ("Question one?", "Answer one"),
+            ("Question two?", "Answer two"),
+            ("Question three?", "Answer three"),
+        ),
+    )
+
+    result = run_turn(request, chains, searcher)
+
+    assert result.kind == "assessment"
+    assert events == ["plan", "search", "synthesis"]
+    assert chains.adaptive_calls == []
+
+
+def test_ready_is_rejected_before_one_adaptive_answer() -> None:
+    chains = FakeChains(adaptive=[AdaptiveDecision(kind="ready_for_search")])
+
+    with pytest.raises(ModelOutputError) as raised:
+        run_turn(TurnRequest(intake=intake(), history=standard_history()), chains, FakeSearcher())
+
+    assert raised.value.reason == "question_required"
+
+
+def test_warning_in_any_owner_answer_bypasses_every_chain_and_search() -> None:
+    chains = FakeChains()
+    searcher = FakeSearcher()
+    request = TurnRequest(
+        intake=intake("My dog seems quieter."),
+        history=history((STANDARD_QUESTIONS[0].text, "Now she is struggling to breathe.")),
+    )
+
+    result = run_turn(request, chains, searcher)
 
     assert result.kind == "emergency_notice"
     assert result.reply == EMERGENCY_NOTICE
-    assert model.calls == [], "the model must not be asked once a warning phrase matched"
+    assert chains.adaptive_calls == []
+    assert chains.plan_calls == []
+    assert searcher.calls == []
 
 
-def test_one_prior_question_permits_a_second() -> None:
-    """O6: with one question already asked, the model may still ask another."""
-    model = FakeChatModel(question("Has it been constant since yesterday, or on and off?"))
-    request = TurnRequest(
-        intake=intake(),
-        history=history(("When did you notice it?", "Yesterday")),
+def test_initial_emergency_still_bypasses_every_stage() -> None:
+    chains = FakeChains()
+    searcher = FakeSearcher()
+
+    result = run_turn(
+        TurnRequest(intake=intake("My dog may have swallowed a medication."), history=[]),
+        chains,
+        searcher,
     )
 
-    result = run_turn(request, model)
-
-    assert result.kind == "question"
-    assert len(model.calls) == 1
-    assert model.modes[0] == "ordinary", "one prior question must not force a recap"
-
-
-def test_two_prior_questions_require_a_summary() -> None:
-    """O5: after two questions the workflow asks for a recap only, and appends the suffix."""
-    model = FakeChatModel(summary("You reported an ear concern that started yesterday."))
-    request = TurnRequest(
-        intake=intake(),
-        history=history(
-            ("When did you notice it?", "Yesterday"),
-            ("Is it constant?", "On and off"),
-        ),
-    )
-
-    result = run_turn(request, model)
-
-    assert result.kind == "summary"
-    assert len(model.calls) == 1
-    assert model.modes[0] == "summary_only"
-    assert result.reply.endswith(SUMMARY_SUFFIX)
-
-
-def test_a_third_question_is_refused_even_if_the_model_returns_one() -> None:
-    """C3: the cap is enforced by the workflow, not by the model's cooperation."""
-    model = FakeChatModel(question("And has she eaten today?"))
-    request = TurnRequest(
-        intake=intake(),
-        history=history(
-            ("When did you notice it?", "Yesterday"),
-            ("Is it constant?", "On and off"),
-        ),
-    )
-
-    with pytest.raises(ModelOutputError) as raised:
-        run_turn(request, model)
-
-    assert raised.value.reason == "question_limit_violation"
-    assert raised.value.parse_failure is False
-    assert len(model.calls) == 1, "no retry: one model call per turn"
+    assert result.kind == "emergency_notice"
+    assert result.emergency_rule == "suspected_ingestion"
+    assert chains.adaptive_calls == []
+    assert searcher.calls == []
