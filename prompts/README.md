@@ -1,27 +1,26 @@
-# Prompts
+# Versioned LangChain prompts
 
-[`question_flow.md`](question_flow.md) is the whole prompt, version 1. The loader in
-`src/backend/model.py` splits it at `<!-- system -->` and `<!-- human -->`, then builds a LangChain
-`ChatPromptTemplate`. Curly-braced text is a template placeholder; literal braces need escaping.
+The backend uses three separate prompt files so each LangChain stage has one responsibility:
 
-The loader hashes the whole file, including these notes, and exposes it as
-`model.prompt.sha256`. A future tracking layer can record that hash with a run, so any edit to the
-prompt is visible in the record.
+| Prompt | Chain responsibility |
+| --- | --- |
+| `adaptive_question.md` | Ask exactly one useful question, or after the mandatory first adaptive answer declare the history ready for search |
+| `search_queries.md` | Convert the answered history into one to three neutral, short, privacy-checked search queries |
+| `evidence_synthesis.md` | Produce the structured, cited result from approved retrieved evidence |
 
-The prompt controls wording. The backend decides whether to call a model and whether this turn may
-contain a question. It receives one of two mode instructions:
+Each file contains `<!-- system -->` and `<!-- human -->` markers. `PromptFile.load` splits on those
+markers and hashes the whole file. Future MLflow traces will record all three hashes.
 
-- **ordinary** — ask the single most useful follow-up question, or write the recap, whichever is
-  more use.
-- **summary_only** — two questions have already been asked; write the recap.
+The backend, not prompt wording, owns the fixed question prefix, minimum/maximum adaptive count,
+emergency route, source allowlist, citation validation, and final disclaimer.
 
-If the model asks a question in `summary_only`, `run_turn` rejects it; the cap does not depend on
-prompt compliance.
+The adaptive prompt cannot suggest causes. The query prompt cannot diagnose or send raw transcript
+text to search. The synthesis prompt runs after retrieval, treats page content as untrusted data,
+requires source IDs for possible areas and observation suggestions, and cannot invent URLs.
 
-The prompt is also told not to add a disclaimer. The application appends a fixed one to every
-recap, so a model-written version would only duplicate it or water it down.
+There is no automatic structured-output repair call. A malformed chain output fails the current
+turn and leaves manual retry to the owner.
 
-After editing, run `uv run pytest`. The fake-model tests do not read this prompt; also run the
-optional real-model check in [the tests README](../tests/README.md) and review its output. Passing
-tests do not establish question quality; use the human-review criteria in
-[the test cases](../documentation/test-cases.md).
+After editing prompts, run the deterministic suite and the opt-in Ollama smoke checks. Passing shape
+tests does not establish medical quality; use the human-review rules in
+[`documentation/test-cases.md`](../documentation/test-cases.md).

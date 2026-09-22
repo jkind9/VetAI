@@ -1,8 +1,14 @@
 # VetAI technical test
 
-A small pet-concern demo. It accepts dog or cat intake, may ask up to two follow-up questions, and
-then returns a model-written recap with a fixed non-diagnostic suffix. Curated emergency phrases in
-owner-written text bypass the model and return a fixed emergency notice.
+A small, source-grounded pet-concern demo. The desktop turns intake into a real conversation:
+three short standard questions are followed by one to three adaptive LLM questions. Only after the
+owner answers those questions does a separate LangChain step create web-search queries, retrieve
+results from an approved veterinary-source list, and pass that evidence to a final synthesis chain.
+
+The result separates what the owner reported, possible areas a veterinarian may consider, useful
+things to observe or record, questions to discuss with a veterinarian, and the sources used.
+Curated emergency phrases in owner-written text still bypass every model and search step and return
+a fixed emergency notice.
 
 This is not a veterinary product. It gives no diagnosis, treatment advice, or urgency rating. The
 phrase rules are deliberately narrow: they can miss emergencies or match misleading wording.
@@ -28,16 +34,18 @@ uv run uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
 uv run --extra desktop python -m frontend.app
 ```
 
-Enter the pet's concern, select **Start chat**, and answer any follow-up questions. The desktop
-connects to `http://127.0.0.1:8000` by default.
+Enter the pet's concern, select **Send concern**, and answer the questions shown in the chat. Owner
+and VetAI messages appear in separate bubbles, with a visible pending state while a request is
+running. The desktop connects to `http://127.0.0.1:8000` by default.
 
 - [Technical-test brief](e071501d-5c3c-4368-9565-a0ba2b94ce0c_Tech_Test.pdf)
 - [Implementation plan](documentation/implementation-plan.md)
 - [Test cases and acceptable responses](documentation/test-cases.md)
 - [Source layout](src/README.md)
 
-The repository contains a runnable FastAPI backend, a small native PySide6 desktop client, the
-versioned prompt, Ollama adapter, and tests. Tracking and CI remain planned.
+The repository contains a runnable FastAPI backend, a native PySide6 desktop client, three
+versioned LangChain prompts, an Ollama adapter, an allowlisted search adapter, and tests. MLflow
+tracking and the final scenario-based production evaluation remain planned milestones.
 
 ## Setup
 
@@ -82,15 +90,32 @@ VETAI_RUN_OLLAMA_SMOKE=1 uv run pytest tests/test_ollama_smoke.py -v -s
 
 It prints the model's actual replies. Use `VETAI_OLLAMA_MODEL` to try a different tag.
 
-Plain Python routes listed emergency phrases and enforces the follow-up cap. The model supplies
-text within the mode the workflow selected. Validation checks only the output's structure: an
-allowed kind, and a non-blank reply within its length limit. It does not verify relevance, factual
-grounding, or medical appropriateness; those remain prompt and human-review concerns.
+Plain Python routes listed emergency phrases, the three standard questions, and the adaptive
+question cap. The model cannot choose the emergency route or search early. Search results are
+filtered against [`config/approved_sources.toml`](config/approved_sources.toml), and the synthesis
+model may cite only source IDs that the workflow actually retrieved. This provides provenance; it
+does not clinically validate the generated text.
 [`src/backend/README.md`](src/backend/README.md) walks through one turn and says where each rule
 lives.
 
-Nothing is stored by the current code. Planned MLflow runs would contain owner-entered text and
-must stay out of Git; delete their local `mlruns/` directory when it is no longer needed.
+Nothing is stored by the current code. The final search step sends only short, model-derived search
+queries to the configured search service; the raw transcript remains local. Retrieved page text is
+untrusted input even when it comes from an approved domain. Planned MLflow runs will make every
+chain and search step traceable and must stay out of Git.
+
+## Conversation and chain order
+
+```text
+concern -> emergency check -> 3 standard questions -> 1-3 adaptive LLM questions
+        -> search-query chain -> approved-source search -> evidence-synthesis chain -> result
+```
+
+The three standard questions always come first. Search never runs before at least one adaptive
+question has been answered. There is no automatic model or search retry and no default medical
+response: a failed stage leaves the owner's latest answer available for a manual retry. See
+[`documentation/failure-handling.md`](documentation/failure-handling.md) for the complete action
+matrix and [`documentation/approved-sources.md`](documentation/approved-sources.md) for the source
+policy.
 
 ## Optional local Docker demo
 

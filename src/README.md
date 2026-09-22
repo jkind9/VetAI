@@ -1,10 +1,13 @@
 # Source layout
 
-The implemented [backend](backend/README.md) owns request validation, emergency routing, workflow
-decisions, and the LangChain/Ollama adapter. It is launched by Uvicorn from `backend.app:app`.
+The [backend](backend/README.md) owns validation, the emergency-first workflow, the deterministic
+question prefix, three LangChain/Ollama stages, approved-source retrieval, grounding, and HTTP
+composition. Uvicorn launches `backend.app:app`.
 
-The implemented [frontend](frontend/README.md) is a native PySide6 client. It owns the visible
-chat state and asynchronous HTTP connection to the backend; it does not import backend code.
+The [frontend](frontend/README.md) is a native PySide6 client. It owns in-memory conversation state,
+separate owner/VetAI bubbles, pending/error states, and asynchronous HTTP. It imports no backend or
+model/search package.
 
-Settings are read from environment variables at backend launch. MLflow tracking remains planned.
-See the [implementation plan](../documentation/implementation-plan.md) for the flow and trade-offs.
+The backend remains stateless and stores no owner data. External search sees generated queries only;
+the raw transcript stays local. MLflow tracking is the next planned source package after the chain
+refactor.
