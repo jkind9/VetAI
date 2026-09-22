@@ -8,10 +8,16 @@ dependencies = [
     "pydantic>=2.9",
     "langchain-core>=0.3",
     "langchain-ollama>=0.2",
+    "uvicorn[standard]>=0.30",
 ]
 
-# FastAPI serves the implemented HTTP boundary. MLflow and PySide6 arrive only with the
-# milestones that need them, so the environment stays as small as the code that exists.
+# The FastAPI backend is the base install. The native desktop client is optional so a backend
+# container does not carry GUI libraries. MLflow remains deferred until its tracking milestone.
+
+[project.optional-dependencies]
+desktop = [
+    "PySide6>=6.8",
+]
 
 [dependency-groups]
 dev = [

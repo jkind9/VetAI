@@ -12,25 +12,47 @@ phrase rules are deliberately narrow: they can miss emergencies or match mislead
 - [Test cases and acceptable responses](documentation/test-cases.md)
 - [Source layout](src/README.md)
 
-The repository currently contains the decision core, versioned prompt, Ollama adapter, and tests.
-The FastAPI route, settings, tracking, desktop client, and CI workflow are still planned, so there
-is no end-to-end application to launch.
+The repository contains a runnable FastAPI backend, a small native PySide6 desktop client, the
+versioned prompt, Ollama adapter, and tests. Tracking and CI remain planned.
 
 ## Setup
 
 Needs Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-uv sync --locked      # install the exact locked dependencies
+uv sync --locked --extra desktop  # install the exact locked dependencies and native client
 uv run pytest         # no model needed
 uv run ruff check .   # lint
+```
+
+## Run locally
+
+Ollama must be running separately. The backend and desktop are independent processes, so start
+them in separate PowerShell terminals:
+
+```powershell
+# Terminal 1: FastAPI backend
+uv run uvicorn --app-dir src backend.app:app --host 127.0.0.1 --port 8000 --reload
+
+# Terminal 2: native desktop client
+uv run --extra desktop python -m frontend.app
+```
+
+The client calls `http://127.0.0.1:8000` by default. Override the model, Ollama URL, timeout, or
+desktop API URL without committing machine-specific values:
+
+```powershell
+$env:VETAI_OLLAMA_MODEL = "llama3:latest"
+$env:OLLAMA_BASE_URL = "http://localhost:11434"
+$env:VETAI_OLLAMA_TIMEOUT_SECONDS = "60"
+$env:BACKEND_API_URL = "http://127.0.0.1:8000"
 ```
 
 The automated tests use a stand-in model. To check the real adapter, install
 [Ollama](https://ollama.com/), pull the model, then run the opt-in test:
 
 ```bash
-ollama pull llama3:8b
+ollama pull llama3:latest
 VETAI_RUN_OLLAMA_SMOKE=1 uv run pytest tests/test_ollama_smoke.py -v -s
 ```
 
@@ -45,3 +67,18 @@ lives.
 
 Nothing is stored by the current code. Planned MLflow runs would contain owner-entered text and
 must stay out of Git; delete their local `mlruns/` directory when it is no longer needed.
+
+## Optional local Docker demo
+
+`compose.yaml` packages the backend and an Ollama service; the PySide6 client remains native and
+connects through `http://127.0.0.1:8000`. The named Ollama volume keeps downloaded models between
+container restarts.
+
+```powershell
+docker compose up --build -d
+docker compose exec ollama ollama pull llama3:latest
+```
+
+The compose file uses Ollama's official default image for local exploration. Set `OLLAMA_IMAGE` to
+a pinned digest before relying on it for a reproducible environment. This is not a public-deployment
+recipe: the demo has no authentication, rate limiting, or clinical-production safety controls.

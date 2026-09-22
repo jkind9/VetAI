@@ -1,12 +1,13 @@
 # Desktop frontend
 
-This folder has design notes only; the PySide6 client is not implemented. The planned client keeps
-the current chat in memory, sends each turn to a FastAPI endpoint, and starts a new flow after a
-summary or emergency notice. It should preserve an answer for manual retry and never retry a model
-call automatically.
+The PySide6 client is a separate local process. `app.py` owns its visible state and widgets;
+`api_client.py` makes one asynchronous HTTP request per owner action. The client keeps the current
+chat in memory, starts a new flow after a summary or emergency notice, preserves an answer for a
+manual retry, and never retries a model call automatically.
 
-The planned HTTP client uses Qt's asynchronous
+The HTTP client uses Qt's asynchronous
 [`QNetworkAccessManager`](https://doc.qt.io/qtforpython-6/PySide6/QtNetwork/QNetworkAccessManager.html).
 It reads only `BACKEND_API_URL` and does not import backend logic, LangChain, Ollama, or MLflow.
 
-The proposed interaction is in the [plan](../../documentation/implementation-plan.md).
+Run it with `uv run --extra desktop python -m frontend.app`. Set `BACKEND_API_URL` to use a backend
+other than the default `http://127.0.0.1:8000`.

@@ -1,0 +1,22 @@
+services:
+  backend:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      VETAI_OLLAMA_MODEL: ${VETAI_OLLAMA_MODEL:-llama3:latest}
+      VETAI_OLLAMA_TIMEOUT_SECONDS: ${VETAI_OLLAMA_TIMEOUT_SECONDS:-60}
+    depends_on:
+      ollama:
+        condition: service_started
+
+  ollama:
+    # The official default image is used for this local demo. Set OLLAMA_IMAGE to a digest before
+    # relying on the Compose setup for a reproducible deployment.
+    image: ${OLLAMA_IMAGE:-ollama/ollama}
+    volumes:
+      - ollama_models:/root/.ollama
+
+volumes:
+  ollama_models:

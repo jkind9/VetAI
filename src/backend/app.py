@@ -11,7 +11,9 @@ from typing import Any
 from fastapi import FastAPI
 
 from backend.error_handling import register_error_handlers
+from backend.model import OllamaChatModel
 from backend.schemas import TurnRequest
+from backend.settings import BackendSettings
 from backend.workflow import run_turn
 
 
@@ -34,3 +36,18 @@ def create_app(model: Any) -> FastAPI:
         return {"reply": result.reply, "kind": result.kind, "run_id": None}
 
     return app
+
+
+def create_runtime_app(settings: BackendSettings | None = None) -> FastAPI:
+    """Build the app used by Uvicorn, with the model selected at process startup."""
+    settings = settings or BackendSettings.from_environment()
+    model = OllamaChatModel(
+        settings.model,
+        base_url=str(settings.base_url),
+        timeout=settings.timeout_seconds,
+    )
+    return create_app(model)
+
+
+# Uvicorn imports this object with ``backend.app:app``. Tests use ``create_app`` with a fake model.
+app = create_runtime_app()

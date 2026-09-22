@@ -9,9 +9,10 @@ and tracking are not written yet.
 | `safeguards.py` | Which phrases count as a warning sign. Imports nothing from the project. |
 | `schemas.py` | The shapes a turn is made of, the length limits, and the two error types. Decides nothing. |
 | `model.py` | Everything provider-specific: the prompt file and the LangChain/Ollama adapter. |
-| `app.py` | Wires the FastAPI routes to the workflow and supplied model. |
+| `app.py` | Wires the FastAPI routes to the workflow, and exposes the Uvicorn `app` object. |
 | `error_handling.py` | The public HTTP responses for request, model, and unexpected failures. |
-| `settings.py`, `tracking.py` | Not written yet: configuration loading and MLflow. |
+| `settings.py` | Reads and validates the three backend launch environment variables. |
+| `tracking.py` | Not written yet: MLflow. |
 
 ## Backend design and conversation flow
 
@@ -152,8 +153,9 @@ LangChain, so the workflow's tests run without a model library installed. The la
 `schemas.py` <- `model.py` <- `workflow.py`, with `safeguards.py` off to one side.
 
 **`OllamaChatModel` reads no configuration.** The model tag, URL, temperature, seed, timeout,
-prompt, and structured-output method are all constructor arguments. A later settings layer can
-supply them; a tracking layer can read `model.prompt.sha256` and the model tag.
+prompt, and structured-output method are all constructor arguments. `BackendSettings` supplies the
+model tag, URL, and timeout only when Uvicorn imports `backend.app:app`; tests instead call
+`create_app` with a fake model. A tracking layer can read `model.prompt.sha256` and the model tag.
 `PromptFile.load` hashes the whole prompt file, so any edit to it shows up as a different hash.
 
 **The follow-up count is only as honest as the caller.** It is counted from the history the client

@@ -1,10 +1,15 @@
 # Configuration
 
-This folder has no configuration files yet. The planned `defaults.yaml` contains non-secret backend
-settings: Ollama model and URL, temperature, seed, prompt path, two-question cap, and local MLflow
-URI. Maximum history length is derived from the cap, not configured separately.
+This folder has no configuration files. The launched backend reads and validates these non-secret
+environment values in `src/backend/settings.py`:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `VETAI_OLLAMA_MODEL` | `llama3:latest` | Installed Ollama model tag. |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL. |
+| `VETAI_OLLAMA_TIMEOUT_SECONDS` | `60` | One model-call timeout. |
+| `BACKEND_API_URL` | `http://127.0.0.1:8000` | Desktop-only backend URL. |
 
 Machine-specific URLs and any future provider credentials belong in environment variables, never
-committed YAML. A future `src/backend/settings.py` would validate these values and support a local
-Ollama URL override. The frontend reads `BACKEND_API_URL` separately. See the
-[plan](../documentation/implementation-plan.md) for the proposed shape.
+committed YAML. Maximum history length remains derived from the two-question cap rather than made
+configurable.

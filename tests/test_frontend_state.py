@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from frontend.app import ChatState
 from frontend.api_client import ApiResult
+from frontend.app import ChatState
 
 
 def _intake() -> dict[str, str]:

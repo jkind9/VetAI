@@ -7,9 +7,21 @@ so a test can assert both whether the model was asked at all and which mode it w
 
 from __future__ import annotations
 
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 from typing import Any
 
+import pytest
+from PySide6.QtWidgets import QApplication
+
 from backend.schemas import Intake, Message, Mode, ModelReply, TurnRequest
+
+
+@pytest.fixture(scope="session")
+def qapplication() -> QApplication:
+    return QApplication.instance() or QApplication([])
 
 
 class FakeChatModel:
