@@ -16,6 +16,13 @@ from backend.workflow import run_turn
 from conftest import FakeChains, FakeSearcher, assessment_draft, intake, ready_history
 
 
+def test_urgent_escalation_decision_has_no_question() -> None:
+    decision = AdaptiveDecision(kind="urgent_escalation")
+
+    assert decision.kind == "urgent_escalation"
+    assert decision.question is None
+
+
 @pytest.mark.parametrize("raw", [None, "question", {}, {"kind": "question"}])
 def test_invalid_adaptive_output_is_a_parse_failure(raw: object) -> None:
     chains = FakeChains(adaptive=[raw])
@@ -76,10 +83,49 @@ def test_synthesis_requires_citations_for_each_grounded_item() -> None:
     with pytest.raises(ValueError):
         AssessmentDraft.model_validate(
             {
+                "outcome": "possible_problem",
                 "what_you_reported": ["Your dog scratched one ear."],
                 "possible_areas": [{"text": "An area", "source_ids": []}],
-                "useful_observations": [],
+                "suggested_actions": [],
                 "questions_for_veterinarian": [],
+            }
+        )
+
+
+def test_assessment_draft_requires_a_supported_outcome_and_application_owns_wording() -> None:
+    draft = assessment_draft()
+
+    assert draft.outcome in {"possible_problem", "nothing_flagged"}
+    assert draft.suggested_actions[0].text.startswith("Record")
+
+    with pytest.raises(ValueError):
+        AssessmentDraft.model_validate(
+            {
+                "outcome": "urgent_escalation",
+                "what_you_reported": ["Your dog scratched one ear."],
+                "possible_areas": [{"text": "An area", "source_ids": ["S1"]}],
+                "suggested_actions": [
+                    {"text": "Record the episode for the vet.", "source_ids": ["S1"]}
+                ],
+                "questions_for_veterinarian": [
+                    {"text": "What should I mention?", "source_ids": ["S1"]}
+                ],
+            }
+        )
+
+    with pytest.raises(ValueError):
+        AssessmentDraft.model_validate(
+            {
+                "outcome": "possible_problem",
+                "outcome_wording": "The model supplied this wording.",
+                "what_you_reported": ["Your dog scratched one ear."],
+                "possible_areas": [{"text": "An area", "source_ids": ["S1"]}],
+                "suggested_actions": [
+                    {"text": "Record the episode for the vet.", "source_ids": ["S1"]}
+                ],
+                "questions_for_veterinarian": [
+                    {"text": "What should I mention?", "source_ids": ["S1"]}
+                ],
             }
         )
 

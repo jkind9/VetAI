@@ -46,8 +46,11 @@ def evidence(
     )
 
 
-def assessment_draft(source_id: str = "S1") -> AssessmentDraft:
+def assessment_draft(
+    source_id: str = "S1", *, outcome: str = "possible_problem"
+) -> AssessmentDraft:
     return AssessmentDraft(
+        outcome=outcome,
         what_you_reported=["Your dog has scratched one ear since this morning."],
         possible_areas=[
             GroundedItem(
@@ -55,9 +58,9 @@ def assessment_draft(source_id: str = "S1") -> AssessmentDraft:
                 source_ids=[source_id],
             )
         ],
-        useful_observations=[
+        suggested_actions=[
             GroundedItem(
-                text="Note any visible change and when the scratching happens.",
+                text="Record when the episode happens and share the pattern with your veterinarian.",
                 source_ids=[source_id],
             )
         ],
