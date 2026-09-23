@@ -12,13 +12,14 @@ The owner gets:
 1. a chat rather than a long intake form;
 2. three short, predictable questions;
 3. between one and three adaptive LLM questions;
-4. a source-grounded result split into reported facts, possible areas, useful observations,
-   questions for a veterinarian, and sources; or
-5. a fixed emergency notice when a narrow deterministic rule matches.
+4. a source-grounded `possible_problem` or `nothing_flagged` result split into reported facts,
+   possible areas, suggested actions, questions for a veterinarian, and sources; or
+5. a fixed emergency notice when either the narrow phrase matcher or the adaptive model escalates.
 
 The original brief prioritises LangChain usage and engineering internals over interface polish.
 This design therefore makes the distinct LangChain stages and their boundaries visible and
-testable. MLflow traceability is the next milestone after this chain refactor.
+testable. Each turn is recorded in MLflow (`src/mlflow_tracking`): one run per turn, with the
+turn's chain calls traced inside it.
 
 ## 2. Ordered conversation
 
@@ -37,7 +38,15 @@ scan all owner-authored text for curated emergency phrases
 three deterministic standard questions
       |
       v
-adaptive-question chain (minimum 1, maximum 3 questions)
+adaptive-question chain: question / ready / urgent escalation
+      | urgent
+      +--------------------------> fixed emergency notice; end
+      |
+      v
+minimum 1, maximum 3 answered adaptive questions
+      |
+      v
+ready decision, including final ready-or-escalate check at the cap
       |
       v
 search-query chain (neutral, short queries derived from all answers)
@@ -58,18 +67,22 @@ The standard questions are, in order:
 2. **Previous occurrence:** “Has this happened before?”
 3. **Pattern:** “Is it happening constantly, or does it come and go?”
 
-The first adaptive question is mandatory. After the owner answers it, the adaptive chain may ask
-another useful question or declare the history ready for search. A third adaptive question is the
-hard maximum. Search never runs before the owner has answered at least one adaptive question and
-never runs before the three standard questions.
+The first adaptive question is mandatory unless the model escalates. After the owner answers it,
+the adaptive chain may ask another useful question, declare the history ready for search, or
+escalate. A third adaptive question is the hard maximum. After its answer, one final
+`ready_or_escalate` decision prevents both a fourth question and an unreviewed jump to search.
+Search never runs before the owner has answered at least one adaptive question and never runs before
+the three standard questions.
 
 ## 3. Three LangChain responsibilities
 
 ### Adaptive-question chain
 
-Receives the complete owner history and decides one thing: ask exactly one relevant question, or
-(after the mandatory first adaptive answer) declare the history ready for search. It does not
-suggest causes, retrieve information, or write the final result.
+Receives the complete owner history and decides one thing: escalate to the fixed emergency route,
+ask exactly one relevant question, or (after the mandatory first adaptive answer) declare the
+history ready for search. It is instructed to reason over meaning, misspellings, and awkward wording
+rather than exact keywords. It never writes the emergency notice, suggests causes, retrieves
+information, or writes the final result.
 
 ### Search-query chain
 
@@ -77,22 +90,27 @@ Runs only after questioning is complete. It returns one to three short, neutral 
 describe the pet, reported concern, timing, pattern, and relevant answers. It must not include
 names, addresses, email addresses, telephone numbers, quoted transcript passages, diagnoses, or
 instructions to the search engine. The application validates queries before sending them outside
-the local machine.
+the local machine. The retrieval adapter requests at most three raw results for each generated
+query, then independently validates every returned URL and redirect.
 
 ### Evidence-synthesis chain
 
 Runs only when approved-source evidence was retrieved. It receives source IDs and bounded excerpts
 as untrusted evidence. It may produce broad areas a veterinarian may consider, but cannot diagnose,
 rank likelihood, prescribe treatment, invent a URL, or cite an unknown source ID. Every possible
-area and every observation suggestion must cite at least one retrieved source ID.
+area and every suggested action must cite at least one retrieved source ID.
 
 ## 4. Structured result
 
 The final API result is structured rather than one free-form paragraph:
 
-- `what_you_reported`: factual recap drawn only from owner-authored text;
+- `outcome`: `possible_problem` or `nothing_flagged`; emergency is returned before synthesis;
+- `outcome_wording`: fixed application text for that outcome, never model wording;
+- `what_you_reported`: application-constructed, labelled recap copied from the initial concern and
+  owner answers; it is not part of the synthesis model's output schema;
 - `possible_areas`: broad, non-ranked areas a veterinarian may consider, each with source IDs;
-- `useful_observations`: source-backed things that may be useful to observe or record;
+- `suggested_actions`: source-backed, low-risk steps such as observing a change, recording an
+  episode for the veterinarian, or simple supportive actions when the evidence supports them;
 - `questions_for_veterinarian`: grounded questions the owner may want to raise;
 - `sources`: titles, organisations, and HTTPS URLs derived by the workflow from retrieved evidence;
 - a fixed non-diagnostic statement owned by the application.
@@ -121,8 +139,10 @@ trade-off.
 
 The deterministic emergency matcher runs before every question, model call, search call, and
 synthesis call. It scans only the initial concern and owner answers, never assistant questions,
-search queries, retrieved pages, or generated output. A match ends the conversation before external
-search.
+search queries, retrieved pages, or generated output. A match ends the conversation before any
+model call. If it does not match, every adaptive decision can still escalate from context; the model
+chooses only the route and the application supplies the same fixed notice. Neither route can lower
+or override the other.
 
 Search is limited by [`approved-sources.md`](approved-sources.md) and the machine-readable catalog
 in `config/approved_sources.toml`. A `site:` clause improves relevance but is not a security
@@ -138,12 +158,14 @@ the model to produce an unsourced assessment.
 
 ## 7. Failure and retry policy
 
-There are no automatic model retries, search retries, alternative models, or model-written default
-medical responses in this milestone. A failed structured response, model call, search, or synthesis
-returns the stable service error and preserves the current owner draft for a manual **Try again**.
-Input and history errors instead ask the owner to correct the named field. Individual unapproved or
-unfetchable search results are discarded; the search stage may continue with other already-returned
-approved results, but it makes no second external search attempt.
+There are no automatic model retries, alternative models, or model-written default medical
+responses in this milestone. The search adapter makes one bounded repeat of the exact same plan
+only when every provider call failed in its first attempt; it never rephrases the query, replans,
+or swaps client. A failed structured response, model call, search, or synthesis returns the stable
+service error and preserves the current owner draft for a manual **Try again**. Input and history
+errors instead ask the owner to correct the named field. Individual unapproved or unfetchable search
+results are discarded, and a provider failure from one query does not discard raw results returned
+by another query.
 
 The full error-to-action contract is in [`failure-handling.md`](failure-handling.md) and the backend
 operator matrix is duplicated in [`../src/backend/README.md`](../src/backend/README.md).
@@ -151,15 +173,17 @@ operator matrix is duplicated in [`../src/backend/README.md`](../src/backend/REA
 ## 8. Architecture
 
 ```text
-PySide6 desktop -> FastAPI /v1/chat -> workflow state machine
-                                         |       |        |
-                                  safeguards  chains   search adapter
-                                                  \       /
-                                              grounded result
+PySide6 desktop --\
+                  -> FastAPI /v1/chat -> workflow state machine
+Svelte browser --/                         |       |        |
+                                     safeguards  chains   search adapter
+                                                     \       /
+                                                 grounded result
 ```
 
-- `frontend/app.py`: owner-visible state, message bubbles, pending state, and current history.
-- `frontend/api_client.py`: asynchronous HTTP and public response parsing.
+- `frontend/local/app.py`: native owner-visible state, message bubbles, and pending state.
+- `frontend/local/api_client.py`: native asynchronous HTTP and public response parsing.
+- `frontend/public`: Svelte browser client served by the backend from its built `dist/` directory.
 - `backend/workflow.py`: state transitions, safety order, caps, citation validation, final result.
 - `backend/questions.py`: immutable standard-question catalog.
 - `backend/model.py`: three LangChain/Ollama chains and prompt loading.
@@ -167,9 +191,12 @@ PySide6 desktop -> FastAPI /v1/chat -> workflow state machine
 - `backend/approved_sources.py`: source-catalog loading and host validation.
 - `backend/schemas.py`: request, chain-output, evidence, and result shapes.
 - `backend/app.py`: dependency composition and HTTP route.
+- `mlflow_tracking/chat_runs.py`: one MLflow run per turn, with the turn's LangChain calls traced.
 
 The workflow depends on duck-typed chain and search objects. Tests supply stage-aware fakes, so
-ordinary tests need neither Ollama nor network access.
+ordinary tests need neither Ollama nor network access. The browser E2E suite builds the production
+Svelte bundle and drives it against a hosted FastAPI process while retaining those deterministic
+model and search boundaries.
 
 ## 9. UI contract
 
@@ -184,11 +211,14 @@ concern**. Starting a new concern clears every bubble and all in-memory state.
 
 ## 10. Deferred milestones
 
-- MLflow spans/runs for each deterministic, model, search, and synthesis stage;
-- scenario-based real-model and live-search evaluation;
+- an MLflow span for the approved-source search step, and per-stage timings as run metrics (runs
+  per turn and traced model calls already exist);
+- automated semantic validation and human-review sign-off for the recorded real-model and
+  live-search evaluations;
 - response-content safeguards beyond citation validation;
 - bounded post-result follow-up questions;
 - clinical review of source policy and emergency rules;
 - persistence, accounts, customer/pet history, RAG/vector storage, deployment, and an ERD.
 
-MLflow is required by the assignment and is deferred only until this chain contract is stable.
+MLflow is required by the assignment. Tracking of each turn exists; the first item above extends
+it.

@@ -40,14 +40,33 @@ for URLs and common contact-data patterns before leaving the local process. This
 minimisation, not guaranteed anonymisation. Search services can log queries, and destination sites
 can observe requested URLs and the caller's public IP.
 
-No query, result, or page content is persisted in this milestone. Future MLflow work must decide
-what can be logged safely before recording any of them.
+Each turn's MLflow trace stores the generated queries and the page excerpts sent to the synthesis
+model, with the rest of the turn. They stay on this machine in `mlflow.db`, which git and Docker
+ignore. Delete that file to remove them.
+
+## Verification
+
+Deterministic tests cover domain scoping, exact host/subdomain validation, HTTPS, redirects,
+deduplication, partial fetch failure, and the no-evidence path without using the network. A separate
+opt-in smoke test fetches MSD Veterinary Manual's committed dog-or-cat emergency page through the
+production catalog/fetcher and checks for the stable terms `heat stroke`, `rapid panting`, and
+`water`:
+
+```powershell
+$env:VETAI_RUN_LIVE_SEARCH_SMOKE = "1"
+uv run pytest tests/test_approved_source_smoke.py -v
+```
+
+It is excluded from ordinary CI because external availability and editorial content are not under
+this repository's control.
 
 ## Editorial rules for synthesis
 
 - Sources support broad informational context; they do not turn the demo into a diagnostic tool.
 - Possible areas are non-ranked and phrased as matters a veterinarian may consider.
-- Treatment instructions, doses, specific test recommendations, reassurance, and statements that
-  veterinary care is unnecessary remain prohibited.
+- Suggested actions may cover observation, recording an episode, or simple low-risk supportive
+  steps only when the retrieved evidence supports them. Medicines, doses, invasive steps,
+  unsupported remedies, forced intake, specific-test recommendations, reassurance, and advice to
+  delay veterinary care remain prohibited.
 - The model cites source IDs only. The workflow resolves IDs to titles and URLs.
 - A claim with no valid retrieved source ID is rejected rather than shown without a citation.

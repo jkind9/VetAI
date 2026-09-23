@@ -1,17 +1,43 @@
 # VetAI technical test
 
+I have read the brief's word *triage* as four jobs: sort the concern into one of three coarse
+outcomes, gather the history a veterinarian would ask for, research the reported signs against
+approved veterinary sources, and give the owner specific things to observe or record before any
+appointment.
+
+Those three outcomes are the only severity judgement the demo makes:
+
+| Outcome | What the owner sees | Who decides it |
+| --- | --- | --- |
+| **Emergency** | A fixed notice to contact an emergency vet now | Either of two routes: curated warning phrases in the owner's own words, matched by plain Python before any model call, or the model judging the reported signs urgent at a later stage |
+| **Possible problem, see a vet** | A recap of what was reported, points to raise, and the sources used | The model, from the owner's answers and the retrieved evidence |
+| **Nothing flagged** | Nothing matched a warning sign and nothing was raised, plus what to watch for and when to go anyway | The model, within fixed wording the application supplies |
+
+Escalation runs one way. The phrase gate and the model can each raise an emergency on their own,
+and neither can lower one: a phrase match ends the turn before the model is asked, and a model that
+judges the reported signs urgent ends the conversation even though no phrase matched. The model
+decides *whether*, never the wording, so both routes return the same fixed notice. Letting the model
+escalate covers the phrase list's real weakness — four categories will miss urgent wording they do
+not contain — and it errs in the safer direction, since a false alarm sends someone to a vet they
+did not need.
+
+"Nothing flagged" is a statement about what this demo checked, not a clinical all-clear. It cannot
+examine a pet, so it says what it found and what to keep an eye on, and never that a pet is well.
+
 A small, source-grounded pet-concern demo. The desktop turns intake into a real conversation:
 three short standard questions are followed by one to three adaptive LLM questions. Only after the
 owner answers those questions does a separate LangChain step create web-search queries, retrieve
 results from an approved veterinary-source list, and pass that evidence to a final synthesis chain.
 
-The result separates what the owner reported, possible areas a veterinarian may consider, useful
-things to observe or record, questions to discuss with a veterinarian, and the sources used.
+The result separates what the owner reported, possible areas a veterinarian may consider,
+source-backed suggested actions (including useful things to observe or record), questions to
+discuss with a veterinarian, and the sources used.
 Curated emergency phrases in owner-written text still bypass every model and search step and return
 a fixed emergency notice.
 
-This is not a veterinary product. It gives no diagnosis, treatment advice, or urgency rating. The
-phrase rules are deliberately narrow: they can miss emergencies or match misleading wording.
+This is not a veterinary product. The three outcomes are a coarse routing decision, not a clinical
+severity score, and the demo gives no diagnosis and no treatment advice. The phrase rules are
+deliberately narrow: they can miss a real emergency and they can fire on misleading wording.
 
 ## Quickstart
 
@@ -31,21 +57,55 @@ uv sync --locked --extra desktop
 uv run uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
 
 # Terminal 2: open the desktop chat
-uv run --extra desktop python -m frontend.app
+uv run --extra desktop python -m frontend.local.app
 ```
 
 Enter the pet's concern, select **Send concern**, and answer the questions shown in the chat. Owner
 and VetAI messages appear in separate bubbles, with a visible pending state while a request is
 running. The desktop connects to `http://127.0.0.1:8000` by default.
 
+### Letting someone else use it
+
+The backend, Ollama, and the model all stay on this machine. The intended reviewer path is the
+browser client in [`src/frontend/public`](src/frontend/public/README.md), so the reviewer installs
+nothing at all.
+
+Build the page once, then put a temporary public URL in front of the running backend with
+[cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/):
+
+```powershell
+# Once: build the browser client into src/frontend/public/dist
+cd src/frontend/public; npm install; npm run build; cd ../../..
+
+# Terminal 3: with the backend already running on port 8000
+cloudflared tunnel --url http://127.0.0.1:8000
+```
+
+It prints a `https://<random>.trycloudflare.com` address, and no Cloudflare account is needed. The
+backend already serves the built page at `/` and the API at `/v1/chat`, so the tunnel needs only one
+origin. `/docs` on the same address exposes the API. The browser client parses and renders the full
+structured assessment contract, including the fixed outcome wording, suggested actions,
+veterinarian questions, and resolved sources. Its production bundle and full question-to-assessment
+path are covered by a hosted-backend Playwright test; see
+[`src/frontend/public/README.md`](src/frontend/public/README.md) for commands and test boundaries.
+
+Node is needed for that build step, never to run the demo. A visitor needs only a browser.
+
+Two things to know before sharing the link. The address is minted per `cloudflared` process: it
+changes every time the tunnel restarts and stops working the moment the process ends, so it suits a
+live demo rather than a link committed anywhere. And it is public with no authentication or rate
+limiting, so anyone holding it can run a chat against this machine. Start the tunnel when it is
+wanted, and stop it afterwards.
+
 - [Technical-test brief](e071501d-5c3c-4368-9565-a0ba2b94ce0c_Tech_Test.pdf)
 - [Implementation plan](documentation/implementation-plan.md)
 - [Test cases and acceptable responses](documentation/test-cases.md)
 - [Source layout](src/README.md)
 
-The repository contains a runnable FastAPI backend, a native PySide6 desktop client, three
-versioned LangChain prompts, an Ollama adapter, an allowlisted search adapter, and tests. MLflow
-tracking and the final scenario-based production evaluation remain planned milestones.
+The repository contains a runnable FastAPI backend, a native PySide6 desktop client, a Svelte
+browser client, three versioned LangChain prompts, an Ollama adapter, an allowlisted search
+adapter, MLflow tracking of every chat turn, and tests. The final scenario-based production
+evaluation remains a planned milestone.
 
 ## Setup
 
@@ -67,7 +127,7 @@ them in separate PowerShell terminals:
 uv run uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
 
 # Terminal 2: native desktop client
-uv run --extra desktop python -m frontend.app
+uv run --extra desktop python -m frontend.local.app
 ```
 
 The client calls `http://127.0.0.1:8000` by default. Override the model, Ollama URL, timeout, or
@@ -91,37 +151,58 @@ VETAI_RUN_OLLAMA_SMOKE=1 uv run pytest tests/test_ollama_smoke.py -v -s
 It prints the model's actual replies. Use `VETAI_OLLAMA_MODEL` to try a different tag.
 
 Plain Python routes listed emergency phrases, the three standard questions, and the adaptive
-question cap. The model cannot choose the emergency route or search early. Search results are
+question cap. The model can raise an emergency of its own, but it cannot clear one and it cannot
+start the search early. Search results are
 filtered against [`config/approved_sources.toml`](config/approved_sources.toml), and the synthesis
 model may cite only source IDs that the workflow actually retrieved. This provides provenance; it
 does not clinically validate the generated text.
 [`src/backend/README.md`](src/backend/README.md) walks through one turn and says where each rule
 lives.
 
-Nothing is stored by the current code. The final search step sends only short, model-derived search
-queries to the configured search service; the raw transcript remains local. Retrieved page text is
-untrusted input even when it comes from an approved domain. Planned MLflow runs will make every
-chain and search step traceable and must stay out of Git.
+Each chat turn is stored on this machine in MLflow's database, `mlflow.db`. That includes the
+owner's concern and answers, the generated search queries, and the page excerpts sent to the model.
+The file is ignored by git; delete it to clear the history. The final search step sends only short,
+model-derived search queries to the configured search service; the raw transcript stays local.
+Retrieved page text is untrusted input even when it comes from an approved domain.
+
+## See each turn in MLflow
+
+Every chat turn is recorded as one MLflow run, with the exact prompts sent to the model, its
+replies, and how long each step took. With the backend running and a chat done, start the MLflow UI
+from the project root:
+
+```powershell
+uv run mlflow ui
+```
+
+Open http://127.0.0.1:5000 and choose the `vetai-chat` experiment. The Runs table has one row per
+turn: the model, the prompt versions, the time taken and the kind of reply. The Traces tab shows
+each turn's model calls. [`src/mlflow_tracking/README.md`](src/mlflow_tracking/README.md) lists
+everything that is recorded.
 
 ## Conversation and chain order
 
 ```text
-concern -> emergency check -> 3 standard questions -> 1-3 adaptive LLM questions
+concern -> phrase emergency check -> 3 standard questions
+        -> adaptive LLM decision(s): ask / ready / urgent escalation
+        -> final ready-or-escalate check at the 3-question cap
         -> search-query chain -> approved-source search -> evidence-synthesis chain -> result
 ```
 
 The three standard questions always come first. Search never runs before at least one adaptive
-question has been answered. There is no automatic model or search retry and no default medical
-response: a failed stage leaves the owner's latest answer available for a manual retry. See
+question has been answered. There is no automatic model retry or default medical response. The
+search adapter repeats an entirely failed generated plan once, without rephrasing or provider
+switching; any later failure leaves the owner's latest answer available for a manual retry. See
 [`documentation/failure-handling.md`](documentation/failure-handling.md) for the complete action
 matrix and [`documentation/approved-sources.md`](documentation/approved-sources.md) for the source
 policy.
 
-## Optional local Docker demo
+## Docker: an example, not a deployment
 
-`compose.yaml` packages the backend and an Ollama service; the PySide6 client remains native and
-connects through `http://127.0.0.1:8000`. The named Ollama volume keeps downloaded models between
-container restarts.
+We are not doing a Docker deployment. `Dockerfile` and `compose.yaml` are an example of how we would
+do it, and they are not tested as part of this project. `compose.yaml` packages the backend and an
+Ollama service; the PySide6 client remains native and connects through `http://127.0.0.1:8000`. The
+named Ollama volume keeps downloaded models between container restarts.
 
 ```powershell
 docker compose up --build -d
