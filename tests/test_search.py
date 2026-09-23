@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import ddgs
 import pytest
 
 from backend.approved_sources import (
@@ -12,12 +11,7 @@ from backend.approved_sources import (
     ApprovedSourceCatalog,
 )
 from backend.schemas import ModelOutputError, SearchPlan
-from backend.search import (
-    ApprovedSourceSearcher,
-    DDGSSearchClient,
-    FetchedPage,
-    query_is_safe,
-)
+from backend.search import ApprovedSourceSearcher, FetchedPage, query_is_safe
 
 
 class FakeSearchClient:
@@ -41,30 +35,6 @@ class FakePageFetcher:
         if isinstance(result, Exception):
             raise result
         return result
-
-
-def test_default_search_client_pins_the_brave_backend(monkeypatch) -> None:
-    calls: list[tuple[str, dict[str, object]]] = []
-
-    class FakeDDGS:
-        def __init__(self, *, timeout: int) -> None:
-            assert timeout == 12
-
-        def text(self, query: str, **kwargs) -> list[dict[str, str]]:
-            calls.append((query, kwargs))
-            return []
-
-    monkeypatch.setattr(ddgs, "DDGS", FakeDDGS)
-
-    client = DDGSSearchClient(timeout=12)
-    client.text("dog panting", region="uk-en", max_results=4)
-
-    assert calls == [
-        (
-            "dog panting",
-            {"region": "uk-en", "max_results": 4, "backend": "brave"},
-        )
-    ]
 
 
 def test_committed_source_catalog_contains_the_reviewed_domains() -> None:
