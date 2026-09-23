@@ -18,9 +18,11 @@ class FakeSearchClient:
     def __init__(self, results: list[dict[str, str]]) -> None:
         self.results = results
         self.queries: list[str] = []
+        self.call_kwargs: list[dict[str, object]] = []
 
     def text(self, query: str, **kwargs) -> list[dict[str, str]]:
         self.queries.append(query)
+        self.call_kwargs.append(kwargs)
         return list(self.results)
 
 
@@ -163,6 +165,22 @@ def test_one_fetch_failure_does_not_hide_other_approved_evidence() -> None:
     results = searcher.search(SearchPlan(queries=["dog concern veterinary"]))
 
     assert [item.title for item in results] == ["Two"]
+
+
+def test_search_requests_only_three_raw_results_per_query() -> None:
+    approved = "https://vet.cornell.edu/one"
+    client = FakeSearchClient([{"title": "One", "href": approved, "body": "one"}])
+    searcher = ApprovedSourceSearcher(
+        ApprovedSourceCatalog.load(DEFAULT_SOURCE_CATALOG_PATH),
+        search_client=client,
+        page_fetcher=FakePageFetcher(
+            {approved: FetchedPage(final_url=approved, text="usable evidence")}
+        ),
+    )
+
+    searcher.search(SearchPlan(queries=["dog concern veterinary"]))
+
+    assert client.call_kwargs[0]["max_results"] == 3
 
 
 def test_query_provider_failure_does_not_discard_earlier_approved_result() -> None:
