@@ -22,7 +22,7 @@ MAX_SECTION_ITEM_CHARS = 500
 
 Species = Literal["dog", "cat"]
 Role = Literal["assistant", "user"]
-QuestionMode = Literal["question_required", "question_or_ready", "ready_or_escalate"]
+QuestionMode = Literal["question_required", "question_or_ready"]
 QuestionType = Literal["standard", "adaptive"]
 TurnKind = Literal["question", "assessment", "emergency_notice"]
 AssessmentOutcome = Literal["possible_problem", "nothing_flagged"]

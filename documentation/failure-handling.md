@@ -50,8 +50,7 @@ the owner sees the stable service error; the application never displays the malf
 | Adaptive model times out | Model adapter raises `timeout` | `503`; retain draft and offer **Try again** | No | No default question |
 | Ollama is unreachable | Model adapter raises `connection` | `503`; retain draft and offer **Try again** | No | No alternative model |
 | Other adaptive model/provider failure | Model adapter raises `model_call_failed` | `503`; retain draft and offer **Try again** | No | No automatic rephrasing |
-| Three adaptive questions have been answered | One final `ready_or_escalate` model decision runs | Escalate or continue to search; no fourth question is displayed | No | The cap is enforced by the workflow |
-| Final `ready_or_escalate` decision asks a question or is malformed | Structured output is rejected before search | `503`; retain draft and offer **Try again** | No | No fourth question and no assumed readiness |
+| Three adaptive questions have been answered | The workflow goes straight to search without calling the model | Continue to search | No | The code counts the questions, so the model is never asked for a fourth |
 | Search-query chain returns malformed, empty, overlong, or unsafe queries | Query plan is rejected before external access when possible | `503`; retain draft and offer **Try again** | No | Raw transcript is never substituted as a query |
 | Search query contains a URL, email address, phone-like value, or other blocked personal/contact pattern | Privacy validator stops before network access | `503`; retain draft and offer **Try again** | No | No weakened query or transcript fallback |
 | One planned query times out, is unreachable, rate-limits, or fails, while another returns raw results | Keep the returned raw results and continue allowlist/fetch validation | Continue if usable approved evidence remains | No additional retry | No unsourced assessment |

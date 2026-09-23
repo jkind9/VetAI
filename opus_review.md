@@ -580,6 +580,14 @@ written.
   - The loop as sketched lets the model skip follow-up questions entirely, by returning None on the
     first pass. Today at least one follow-up question is required, which is the other 503 dead end
     in problem 5. Whether that minimum stays is also the owner's call.
+- **Done (2026-09-23, local task 06).** A second real llama3 chat hit the same dead end in a new
+  form: at the limit the model replied `ready_for_search` but also included a question, which the
+  schema rejects, so the turn was a 503. The loop is now in `run_turn`: once three follow-up
+  answers exist, the workflow goes straight to search and the model is not called. The owner asked
+  for the smallest change, which settles the two open choices for now:
+  - the model's last chance to raise an emergency after the third answer is dropped; the phrase
+    matcher still checks that answer before search;
+  - the first follow-up question stays mandatory, so that 503 dead end is still open.
 
 ### 2. The desktop client hid every 422 and 503
 
@@ -719,6 +727,8 @@ schemas, while urgent escalation remains available in every mode.
 > **Owner decision (2026-09-23).** For the limit of three, use a code-enforced loop instead of a
 > cap schema. After the third answer the workflow goes to search without asking the model for a
 > question, so a fourth question cannot happen. See "Found while fixing", item 1.
+>
+> **Done (2026-09-23).** The loop is in place; see "Found while fixing", item 1.
 
 ### 5. Bound synthesis context and improve evidence extraction
 

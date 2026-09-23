@@ -39,11 +39,6 @@ MODE_INSTRUCTIONS: dict[QuestionMode, str] = {
         "now. Otherwise return one useful question if an important descriptive detail is still "
         "missing, or `ready_for_search` with question set to null."
     ),
-    "ready_or_escalate": (
-        "The question limit has been reached. Return `urgent_escalation` if the owner-reported "
-        "signs may need an emergency veterinarian now; otherwise return `ready_for_search`. Do not "
-        "ask another question."
-    ),
 }
 
 

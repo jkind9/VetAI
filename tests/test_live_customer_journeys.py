@@ -379,13 +379,14 @@ def test_j3_real_model_search_and_grounded_assessment(
         stages = [event["stage"] for event in journey.chains.events]
         assert stages[-2:] == ["query", "synthesis"]
         adaptive_events = journey.chains.events[:-2]
-        assert len(adaptive_events) == len(adaptive_questions) + 1
         assert adaptive_events[0]["mode"] == "question_required"
-        assert adaptive_events[-1]["output"]["kind"] == "ready_for_search"
-        expected_final_mode = (
-            "ready_or_escalate" if len(adaptive_questions) == 3 else "question_or_ready"
-        )
-        assert adaptive_events[-1]["mode"] == expected_final_mode
+        if len(adaptive_questions) == 3:
+            # At the limit the code goes straight to search without asking the model.
+            assert len(adaptive_events) == 3
+        else:
+            assert len(adaptive_events) == len(adaptive_questions) + 1
+            assert adaptive_events[-1]["output"]["kind"] == "ready_for_search"
+            assert adaptive_events[-1]["mode"] == "question_or_ready"
         assert len(journey.searcher.events) == 1
         generated_queries = journey.chains.events[-2]["output"]["queries"]
         assert all(query_is_safe(query) for query in generated_queries)

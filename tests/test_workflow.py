@@ -100,65 +100,38 @@ def test_assessment_result_exposes_fixed_wording_for_each_supported_outcome(
     assert result.assessment.outcome_wording == workflow.OUTCOME_WORDING[outcome]
 
 
-def test_cap_makes_final_safety_call_then_searches_without_question() -> None:
+THREE_ADAPTIVE_PAIRS = (
+    ("Question one?", "Answer one"),
+    ("Question two?", "Answer two"),
+    ("Question three?", "Answer three"),
+)
+
+
+def test_after_three_adaptive_answers_the_model_is_not_asked_again() -> None:
+    # The code counts the follow-up questions, so a fourth one cannot be asked for.
     events: list[str] = []
-    chains = FakeChains(adaptive=[{"kind": "ready_for_search"}], events=events)
+    chains = FakeChains(adaptive=[], events=events)
     searcher = FakeSearcher(events=events)
-    request = TurnRequest(
-        intake=intake(),
-        history=ready_history(
-            ("Question one?", "Answer one"),
-            ("Question two?", "Answer two"),
-            ("Question three?", "Answer three"),
-        ),
-    )
+    request = TurnRequest(intake=intake(), history=ready_history(*THREE_ADAPTIVE_PAIRS))
 
     result = run_turn(request, chains, searcher)
 
     assert result.kind == "assessment"
-    assert events == ["adaptive", "plan", "search", "synthesis"]
-    assert chains.adaptive_calls[0][1] == "ready_or_escalate"
+    assert events == ["plan", "search", "synthesis"]
+    assert chains.adaptive_calls == []
 
 
-def test_after_three_adaptive_answers_final_safety_call_can_escalate() -> None:
-    events: list[str] = []
-    chains = FakeChains(adaptive=[{"kind": "urgent_escalation"}], events=events)
-    searcher = FakeSearcher(events=events)
-    request = TurnRequest(
-        intake=intake(),
-        history=ready_history(
-            ("Question one?", "Answer one"),
-            ("Question two?", "Answer two"),
-            ("Question three?", "Answer three"),
-        ),
-    )
+def test_an_emergency_phrase_in_the_third_answer_still_stops_the_chat() -> None:
+    chains = FakeChains(adaptive=[])
+    searcher = FakeSearcher()
+    pairs = (*THREE_ADAPTIVE_PAIRS[:2], ("Question three?", "She collapsed a minute ago"))
+    request = TurnRequest(intake=intake(), history=ready_history(*pairs))
 
     result = run_turn(request, chains, searcher)
 
     assert result.kind == "emergency_notice"
     assert result.reply == EMERGENCY_NOTICE
-    assert events == ["adaptive"]
-    assert chains.adaptive_calls[0][1] == "ready_or_escalate"
-    assert chains.plan_calls == []
-    assert searcher.calls == []
-
-
-def test_cap_rejects_a_fourth_question_before_search() -> None:
-    chains = FakeChains(adaptive=[{"kind": "question", "question": "Another question?"}])
-    searcher = FakeSearcher()
-    request = TurnRequest(
-        intake=intake(),
-        history=ready_history(
-            ("Question one?", "Answer one"),
-            ("Question two?", "Answer two"),
-            ("Question three?", "Answer three"),
-        ),
-    )
-
-    with pytest.raises(ModelOutputError) as raised:
-        run_turn(request, chains, searcher)
-
-    assert raised.value.reason == "invalid_model_output"
+    assert chains.adaptive_calls == []
     assert chains.plan_calls == []
     assert searcher.calls == []
 

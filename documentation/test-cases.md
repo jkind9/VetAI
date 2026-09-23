@@ -36,11 +36,10 @@ and, where applicable, live approved-source search.
 | A2 | One adaptive pair complete; fake adaptive chain returns `ready_for_search` | Call query chain, then search, then synthesis; return structured assessment |
 | A3 | One adaptive pair complete; fake asks a second question | Return question; no search |
 | A4 | Two adaptive pairs complete; fake asks a third question | Return question; no search |
-| A5 | Three adaptive pairs complete; fake returns `ready_for_search` | Make one `ready_or_escalate` call, then query → search → synthesis; never show a fourth adaptive question |
+| A5 | Three adaptive pairs complete | No adaptive call; query → search → synthesis. A phrase-matcher emergency in the third answer still stops the chat first |
 | A6 | First adaptive call returns `ready_for_search` | `503`; no search; no substitute question; owner can manually retry |
 | A7 | Adaptive output is malformed, blank, or overlong | `503`; no automatic retry; raw output is hidden |
 | A8 | Any adaptive call returns `urgent_escalation` | Return the fixed `emergency_notice`; no query, search, or synthesis call |
-| A9 | Final `ready_or_escalate` call asks a fourth question | Reject with `503`; never display the question and never search |
 
 ## R — query generation and approved-source retrieval
 
@@ -97,7 +96,7 @@ and, where applicable, live approved-source search.
 | F5 | Search failure/no evidence | Same `503`; no synthesis |
 | F6 | Unexpected application exception | `500` with same safe service text; diagnostics stay in logs |
 | F7 | Tracking | A successful response carries the `run_id` of the turn's MLflow run; error bodies keep `run_id: null`; every failed turn's run is marked FAILED with a `failure_reason` tag (plus `failed_stage` for model, search and grounding failures); if MLflow cannot open a run, the reply still goes out untraced with `run_id: null`; a failed MLflow write never changes the reply or its status; a deleted experiment is restored at startup |
-| F8 | Final escalation-only decision is malformed or asks another question | Same `503`; no search and no fourth question |
+| F8 | Three adaptive answers exist | No model call is made, so no malformed or fourth-question reply can occur; the turn goes to search |
 
 ## D — desktop behaviour
 
@@ -117,7 +116,7 @@ and, where applicable, live approved-source search.
 | --- | --- | --- |
 | W1 | `src/frontend/public/dist` is absent | Backend starts normally; no static mount is added; API routes remain available |
 | W2 | A built `dist/index.html` is present | `/` serves the browser bundle while `/health`, `/v1/chat`, and `/docs` retain route priority |
-| W3 | Owner answers all fixed questions and all three adaptive questions; final `ready_or_escalate` decision is ready; outcome is `possible_problem` | Production browser bundle sends every turn to hosted FastAPI and renders fixed wording, reported facts, possible areas, suggested actions, veterinarian questions, resolved sources, disclaimer, and **New concern** |
+| W3 | Owner answers all fixed questions and all three adaptive questions; the workflow goes straight to search; outcome is `possible_problem` | Production browser bundle sends every turn to hosted FastAPI and renders fixed wording, reported facts, possible areas, suggested actions, veterinarian questions, resolved sources, disclaimer, and **New concern** |
 | W4 | Owner answers all fixed and adaptive questions; outcome is `nothing_flagged` | Production browser bundle renders the bounded non-clearance wording, suggested actions, sources, disclaimer, and **New concern**, with no possible-areas section |
 | W5 | Initial concern matches a deterministic emergency rule | Hosted backend returns the fixed notice immediately; browser removes the answer composer and shows **New concern** |
 | W6 | Concern contains misspelled urgent context (`dieing`) that does not match a phrase rule; deterministic model adapter escalates after the fixed questions | Browser renders the complete fixed emergency notice, removes the answer composer, and shows **New concern** |

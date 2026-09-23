@@ -69,8 +69,9 @@ The standard questions are, in order:
 
 The first adaptive question is mandatory unless the model escalates. After the owner answers it,
 the adaptive chain may ask another useful question, declare the history ready for search, or
-escalate. A third adaptive question is the hard maximum. After its answer, one final
-`ready_or_escalate` decision prevents both a fourth question and an unreviewed jump to search.
+escalate. A third adaptive question is the hard maximum. The code counts the questions: after the third
+answer the workflow goes straight to search without asking the model, so a fourth question cannot
+be requested. The phrase matcher still checks that answer first.
 Search never runs before the owner has answered at least one adaptive question and never runs before
 the three standard questions.
 

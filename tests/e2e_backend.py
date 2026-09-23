@@ -46,8 +46,6 @@ class ScenarioChains:
             )
         if "dieing" in concern:
             return AdaptiveDecision(kind="urgent_escalation")
-        if mode == "ready_or_escalate":
-            return AdaptiveDecision(kind="ready_for_search")
         answered_adaptive = max(0, (len(turn.history) // 2) - 3)
         if "persistent" in concern:
             return AdaptiveDecision(

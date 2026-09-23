@@ -56,7 +56,7 @@ flowchart TD
     standard -->|yes| adaptive_count
     adaptive_count -->|0: question_required| adaptive
     adaptive_count -->|1 or 2: question_or_ready| adaptive
-    adaptive_count -->|3: ready_or_escalate| adaptive
+    adaptive_count -->|3: limit reached, no model call| query
     adaptive --> adaptive_result
     adaptive_result -->|urgent| emergency_notice
     adaptive_result -->|question, when mode permits| adaptive_question
@@ -95,8 +95,9 @@ the backend infers the phase from zero to six completed question/answer pairs:
 - pair 4—the first adaptive question and answer—is mandatory before search can start;
 - after adaptive pairs 1 and 2, the adaptive chain may ask another question or return
   `ready_for_search`;
-- after adaptive pair 3, the workflow makes one final `ready_or_escalate` call and never displays a
-  fourth question.
+- after adaptive pair 3, the workflow goes straight to search without calling the adaptive chain.
+  The code counts the follow-up questions, so the model is never asked for a fourth one. The phrase
+  matcher still checks the third answer first.
 
 History must alternate assistant then owner, end in an owner answer, stay within 12 messages, and
 use non-blank bounded text. Requiring the exact standard prefix prevents accidental client drift,
@@ -113,9 +114,8 @@ chains.synthesise_assessment(turn, evidence)
 ```
 
 The adaptive chain escalates, asks one question, or indicates readiness. The first call uses
-`question_required`, later calls use `question_or_ready`, and the cap uses `ready_or_escalate`.
-Every mode permits escalation; only the latter two permit readiness, and only the first two permit a
-question. The query chain sees the answered history and returns one to three neutral queries. At
+`question_required` and the next two use `question_or_ready`. Both modes permit escalation and a
+question; only `question_or_ready` permits readiness. There is no call at the cap. The query chain sees the answered history and returns one to three neutral queries. At
 least one query must explicitly compare whether the main sign is normal/expected versus
 concerning/abnormal. The synthesis chain runs after retrieval and receives bounded, untrusted
 evidence blocks identified by source ID.
@@ -204,8 +204,7 @@ source policy and privacy boundary.
 | Model timeout | Raise `ModelOutputError(timeout)` | Same `503` | No | No default question/assessment |
 | Ollama connection failure | Raise `ModelOutputError(connection)` | Same `503` | No | No alternate provider |
 | Other provider failure | Raise `ModelOutputError(model_call_failed)` | Same `503` | No | No automatic rephrasing |
-| Three adaptive answers complete | Run final `ready_or_escalate` decision | Escalate or continue to search | No | No fourth question |
-| Final safety decision asks a question or is malformed | Reject before search | `503`, preserve draft | No | No assumed readiness |
+| Three adaptive answers complete | Go straight to search; the adaptive chain is not called | Continue to search | No | No fourth question can be requested |
 | Invalid/unsafe search plan | Reject before external call when possible | `503`, preserve draft | No | Transcript is never used as fallback query |
 | One query fails but another returns raw results | Keep raw results and continue allowlist/fetch validation | Continue if approved evidence remains | No additional retry | No unsourced response |
 | Every provider call fails | Repeat the exact plan once; then raise `ModelOutputError(search_failed)` if it fails again | Same `503` | One bounded repeat only | No rephrasing, provider swap, or unsourced response |

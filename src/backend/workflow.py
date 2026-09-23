@@ -68,37 +68,28 @@ def run_turn(turn: TurnRequest, chains: Any, searcher: Any) -> TurnResult:
             question_id=standard.id,
         )
 
+    # The follow-up questions are a loop the code counts, one pass per HTTP turn: the count comes
+    # from the history the client sends. After the last pass the model is not asked again, so it
+    # cannot ask a fourth question.
     adaptive_count = completed_pairs - STANDARD_QUESTION_COUNT
-    mode: QuestionMode
-    if adaptive_count == 0:
-        mode = "question_required"
-    elif adaptive_count < MAX_ADAPTIVE_QUESTIONS:
-        mode = "question_or_ready"
-    else:
-        mode = "ready_or_escalate"
-
-    raw_decision = _call_stage(
-        "adaptive_question", chains.propose_adaptive_question, turn, mode
-    )
-    decision = _validate_chain_output(
-        AdaptiveDecision, raw_decision, stage="adaptive_question"
-    )
-    if decision.kind == "urgent_escalation":
-        return _emergency_result("model_urgent_escalation")
-    if decision.kind == "question":
-        if mode == "ready_or_escalate":
-            raise ModelOutputError(
-                "invalid_model_output",
-                "adaptive question cap has been reached",
-                stage="adaptive_question",
-            )
-        return TurnResult(
-            kind="question",
-            reply=decision.question,
-            question_type="adaptive",
+    if adaptive_count < MAX_ADAPTIVE_QUESTIONS:
+        mode: QuestionMode = "question_required" if adaptive_count == 0 else "question_or_ready"
+        raw_decision = _call_stage(
+            "adaptive_question", chains.propose_adaptive_question, turn, mode
         )
-    if adaptive_count == 0:
-        raise ModelOutputError("question_required", stage="adaptive_question")
+        decision = _validate_chain_output(
+            AdaptiveDecision, raw_decision, stage="adaptive_question"
+        )
+        if decision.kind == "urgent_escalation":
+            return _emergency_result("model_urgent_escalation")
+        if decision.kind == "question":
+            return TurnResult(
+                kind="question",
+                reply=decision.question,
+                question_type="adaptive",
+            )
+        if adaptive_count == 0:
+            raise ModelOutputError("question_required", stage="adaptive_question")
 
     return _build_assessment(turn, chains, searcher)
 
