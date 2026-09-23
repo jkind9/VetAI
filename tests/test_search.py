@@ -24,6 +24,23 @@ class FakeSearchClient:
         return list(self.results)
 
 
+class SequencedSearchClient:
+    """Return or raise each scripted provider outcome in call order."""
+
+    def __init__(self, outcomes: list[list[dict[str, str]] | Exception]) -> None:
+        self.outcomes = list(outcomes)
+        self.queries: list[str] = []
+
+    def text(self, query: str, **kwargs) -> list[dict[str, str]]:
+        self.queries.append(query)
+        if not self.outcomes:
+            raise AssertionError("unexpected search-provider call")
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return list(outcome)
+
+
 class FakePageFetcher:
     def __init__(self, pages: dict[str, FetchedPage | Exception]) -> None:
         self.pages = pages
@@ -146,6 +163,81 @@ def test_one_fetch_failure_does_not_hide_other_approved_evidence() -> None:
     results = searcher.search(SearchPlan(queries=["dog concern veterinary"]))
 
     assert [item.title for item in results] == ["Two"]
+
+
+def test_query_provider_failure_does_not_discard_earlier_approved_result() -> None:
+    approved = "https://vet.cornell.edu/one"
+    client = SequencedSearchClient(
+        [
+            [{"title": "One", "href": approved, "body": "one"}],
+            TimeoutError("provider timed out"),
+        ]
+    )
+    searcher = ApprovedSourceSearcher(
+        ApprovedSourceCatalog.load(DEFAULT_SOURCE_CATALOG_PATH),
+        search_client=client,
+        page_fetcher=FakePageFetcher(
+            {approved: FetchedPage(final_url=approved, text="usable evidence")}
+        ),
+    )
+
+    results = searcher.search(SearchPlan(queries=["dog concern one", "dog concern two"]))
+
+    assert [item.title for item in results] == ["One"]
+    assert len(client.queries) == 2
+
+
+def test_all_provider_failures_retry_the_same_plan_once_before_succeeding() -> None:
+    approved = "https://vet.cornell.edu/recovered"
+    client = SequencedSearchClient(
+        [
+            TimeoutError("provider timed out"),
+            [{"title": "Recovered", "href": approved, "body": "recovered"}],
+        ]
+    )
+    searcher = ApprovedSourceSearcher(
+        ApprovedSourceCatalog.load(DEFAULT_SOURCE_CATALOG_PATH),
+        search_client=client,
+        page_fetcher=FakePageFetcher(
+            {approved: FetchedPage(final_url=approved, text="usable evidence")}
+        ),
+    )
+
+    results = searcher.search(SearchPlan(queries=["dog concern veterinary"]))
+
+    assert [item.title for item in results] == ["Recovered"]
+    assert client.queries[0] == client.queries[1]
+
+
+def test_all_provider_failures_stop_after_one_retry() -> None:
+    client = SequencedSearchClient(
+        [TimeoutError("first failure"), TimeoutError("second failure")]
+    )
+    searcher = ApprovedSourceSearcher(
+        ApprovedSourceCatalog.load(DEFAULT_SOURCE_CATALOG_PATH),
+        search_client=client,
+        page_fetcher=FakePageFetcher({}),
+    )
+
+    with pytest.raises(ModelOutputError) as raised:
+        searcher.search(SearchPlan(queries=["dog concern veterinary"]))
+
+    assert raised.value.reason == "search_failed"
+    assert len(client.queries) == 2
+
+
+def test_empty_provider_results_have_a_distinct_named_outcome() -> None:
+    searcher = ApprovedSourceSearcher(
+        ApprovedSourceCatalog.load(DEFAULT_SOURCE_CATALOG_PATH),
+        search_client=FakeSearchClient([]),
+        page_fetcher=FakePageFetcher({}),
+    )
+
+    with pytest.raises(ModelOutputError) as raised:
+        searcher.search(SearchPlan(queries=["dog concern veterinary"]))
+
+    assert raised.value.reason == "no_search_results"
+    assert raised.value.stage == "approved_source_search"
 
 
 def test_no_usable_approved_result_is_a_named_failure() -> None:
