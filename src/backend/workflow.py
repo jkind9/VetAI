@@ -45,6 +45,8 @@ OUTCOME_WORDING = {
     ),
 }
 
+STANDARD_REPORT_LABELS = ("Duration", "Previous occurrence", "Pattern")
+
 TModel = TypeVar("TModel", bound=BaseModel)
 
 
@@ -160,7 +162,7 @@ def _build_assessment(turn: TurnRequest, chains: Any, searcher: Any) -> TurnResu
     draft = _validate_chain_output(
         AssessmentDraft, raw_draft, stage="evidence_synthesis"
     )
-    assessment = _ground_assessment(draft, evidence)
+    assessment = _ground_assessment(draft, evidence, _owner_report_summary(turn))
     return TurnResult(kind="assessment", assessment=assessment)
 
 
@@ -189,7 +191,9 @@ def _validate_chain_output(
 
 
 def _ground_assessment(
-    draft: AssessmentDraft, evidence: list[EvidenceItem]
+    draft: AssessmentDraft,
+    evidence: list[EvidenceItem],
+    owner_report_summary: list[str],
 ) -> Assessment:
     evidence_by_id = {item.source_id: item for item in evidence}
     referenced_ids: set[str] = set()
@@ -222,10 +226,25 @@ def _ground_assessment(
     return Assessment(
         outcome=draft.outcome,
         outcome_wording=OUTCOME_WORDING[draft.outcome],
-        what_you_reported=draft.what_you_reported,
+        what_you_reported=owner_report_summary,
         possible_areas=draft.possible_areas,
         suggested_actions=draft.suggested_actions,
         questions_for_veterinarian=draft.questions_for_veterinarian,
         sources=sources,
         disclaimer=ASSESSMENT_SUFFIX,
     )
+
+
+def _owner_report_summary(turn: TurnRequest) -> list[str]:
+    """Label owner-authored text without asking a model to restate it."""
+    answers = [message.content for message in turn.history if message.role == "user"]
+    summary = [f"Concern: {turn.intake.concern}"]
+    summary.extend(
+        f"{label}: {answer}"
+        for label, answer in zip(STANDARD_REPORT_LABELS, answers, strict=False)
+    )
+    summary.extend(
+        f"Additional detail {index}: {answer}"
+        for index, answer in enumerate(answers[len(STANDARD_REPORT_LABELS) :], start=1)
+    )
+    return summary

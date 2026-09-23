@@ -84,7 +84,6 @@ def test_synthesis_requires_citations_for_each_grounded_item() -> None:
         AssessmentDraft.model_validate(
             {
                 "outcome": "possible_problem",
-                "what_you_reported": ["Your dog scratched one ear."],
                 "possible_areas": [{"text": "An area", "source_ids": []}],
                 "suggested_actions": [],
                 "questions_for_veterinarian": [],
@@ -102,7 +101,6 @@ def test_assessment_draft_requires_a_supported_outcome_and_application_owns_word
         AssessmentDraft.model_validate(
             {
                 "outcome": "urgent_escalation",
-                "what_you_reported": ["Your dog scratched one ear."],
                 "possible_areas": [{"text": "An area", "source_ids": ["S1"]}],
                 "suggested_actions": [
                     {"text": "Record the episode for the vet.", "source_ids": ["S1"]}
@@ -118,8 +116,32 @@ def test_assessment_draft_requires_a_supported_outcome_and_application_owns_word
             {
                 "outcome": "possible_problem",
                 "outcome_wording": "The model supplied this wording.",
-                "what_you_reported": ["Your dog scratched one ear."],
                 "possible_areas": [{"text": "An area", "source_ids": ["S1"]}],
+                "suggested_actions": [
+                    {"text": "Record the episode for the vet.", "source_ids": ["S1"]}
+                ],
+                "questions_for_veterinarian": [
+                    {"text": "What should I mention?", "source_ids": ["S1"]}
+                ],
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("outcome", "possible_areas"),
+    [
+        ("possible_problem", []),
+        ("nothing_flagged", [{"text": "An area", "source_ids": ["S1"]}]),
+    ],
+)
+def test_assessment_outcome_matches_possible_areas(
+    outcome: str, possible_areas: list[dict[str, object]]
+) -> None:
+    with pytest.raises(ValueError):
+        AssessmentDraft.model_validate(
+            {
+                "outcome": outcome,
+                "possible_areas": possible_areas,
                 "suggested_actions": [
                     {"text": "Record the episode for the vet.", "source_ids": ["S1"]}
                 ],

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from backend.model import PromptFile, SEARCH_PROMPT_PATH
-from backend.schemas import AdaptiveDecision, TurnRequest
+import pytest
+
+from backend.model import SEARCH_PROMPT_PATH, PromptFile
+from backend.schemas import AdaptiveDecision, AssessmentDraft, TurnRequest
 from backend.workflow import run_turn
 from conftest import FakeChains, FakeSearcher, assessment_draft, intake, ready_history
 
@@ -16,17 +18,20 @@ def test_search_prompt_requires_a_normal_versus_concerning_query() -> None:
     assert "concerning or abnormal" in rules
 
 
-def test_assessment_recap_uses_owner_words_not_synthesis_output() -> None:
-    hallucinated_draft = assessment_draft().model_copy(
-        update={
-            "what_you_reported": [
-                "Your dog has brachycephalic obstructive airway syndrome."
-            ]
-        }
-    )
+def test_synthesis_schema_rejects_a_model_authored_owner_recap() -> None:
+    raw_draft = assessment_draft().model_dump()
+    raw_draft["what_you_reported"] = [
+        "Your dog has brachycephalic obstructive airway syndrome."
+    ]
+
+    with pytest.raises(ValueError):
+        AssessmentDraft.model_validate(raw_draft)
+
+
+def test_assessment_recap_is_constructed_from_owner_words() -> None:
     chains = FakeChains(
         adaptive=[AdaptiveDecision(kind="ready_for_search")],
-        assessments=[hallucinated_draft],
+        assessments=[assessment_draft()],
     )
     request = TurnRequest(
         intake=intake("My dog has been panting more than usual while resting."),
@@ -51,4 +56,3 @@ def test_assessment_recap_uses_owner_words_not_synthesis_output() -> None:
             "and has no vomiting."
         ),
     ]
-

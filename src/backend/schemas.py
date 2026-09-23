@@ -125,9 +125,6 @@ class AssessmentDraft(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, frozen=True)
 
     outcome: AssessmentOutcome
-    what_you_reported: list[Annotated[str, Field(min_length=1, max_length=500)]] = Field(
-        min_length=1, max_length=5
-    )
     possible_areas: list[GroundedItem] = Field(max_length=3)
     suggested_actions: list[GroundedItem] = Field(min_length=1, max_length=4)
     questions_for_veterinarian: list[GroundedItem] = Field(min_length=1, max_length=3)
