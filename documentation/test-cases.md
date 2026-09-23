@@ -96,7 +96,7 @@ and, where applicable, live approved-source search.
 | F4 | Invalid structured output at any chain | Same `503`; no automatic parse-repair call |
 | F5 | Search failure/no evidence | Same `503`; no synthesis |
 | F6 | Unexpected application exception | `500` with same safe service text; diagnostics stay in logs |
-| F7 | Tracking | A successful response carries the `run_id` of the turn's MLflow run; error bodies keep `run_id: null`; every failed turn's run is marked FAILED with a `failure_reason` tag (plus `failed_stage` for model, search and grounding failures); if MLflow cannot open a run, the reply still goes out with `run_id: null`; a deleted experiment is restored at startup |
+| F7 | Tracking | A successful response carries the `run_id` of the turn's MLflow run; error bodies keep `run_id: null`; every failed turn's run is marked FAILED with a `failure_reason` tag (plus `failed_stage` for model, search and grounding failures); if MLflow cannot open a run, the reply still goes out untraced with `run_id: null`; a failed MLflow write never changes the reply or its status; a deleted experiment is restored at startup |
 | F8 | Final escalation-only decision is malformed or asks another question | Same `503`; no search and no fourth question |
 
 ## D — desktop behaviour

@@ -25,10 +25,10 @@ or invent a fallback.
 - Individual unusable search results may be discarded while other results from the same completed
   search are used. That is filtering, not a retry.
 - A failed query does not discard raw results returned by another query in the same plan.
-- Every turn is recorded as an MLflow run. If MLflow cannot open a run, the turn is answered anyway
-  with `run_id: null` and the error is logged. An MLflow write that fails after the run has opened,
-  such as the experiment being deleted mid-turn or the database being briefly locked, still gives
-  the `500` service text, even for a reply that was ready or a `422`. A deleted experiment is restored when the server starts.
+- Every turn is recorded as an MLflow run, and recording never changes the reply. If MLflow cannot
+  open a run, the turn is answered anyway, untraced, with `run_id: null`, and the error is logged.
+  Any later MLflow write that fails is logged and skipped. A deleted experiment is restored when
+  the server starts.
 
 “Ask the same thing another way” is not a hidden recovery path. It would be another owner-visible
 model call and is deferred with post-result follow-ups. If a structured chain output is malformed,

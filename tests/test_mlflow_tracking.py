@@ -15,6 +15,7 @@ from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.prompts import ChatPromptTemplate
 from mlflow import MlflowClient
 from mlflow.entities import Run, Trace
+from mlflow.exceptions import MlflowException
 
 from backend.app import create_app
 from backend.error_handling import SERVICE_ERROR_TEXT
@@ -229,3 +230,50 @@ def test_many_turns_at_once_are_all_answered_and_recorded() -> None:
 
     assert [reply.get("kind") for reply in replies] == ["question"] * 48
     assert all(len(_traces_of(reply["run_id"])) == 1 for reply in replies)
+
+
+def _fail_with_a_locked_database(*args: Any, **kwargs: Any) -> None:
+    raise MlflowException("database is locked")
+
+
+@pytest.mark.parametrize("write", ["log_params", "set_tag", "log_metric", "end_run"])
+def test_a_failed_mlflow_write_does_not_cost_the_reply(
+    monkeypatch: pytest.MonkeyPatch, write: str
+) -> None:
+    monkeypatch.setattr(mlflow, write, _fail_with_a_locked_database)
+    client = TestClient(create_app(FakeChains(), FakeSearcher()))
+
+    response = client.post("/v1/chat", json=_request("My dog collapsed"))
+
+    assert response.status_code == 200
+    assert response.json()["kind"] == "emergency_notice"
+
+
+def test_a_rejected_history_keeps_its_422_when_an_mlflow_write_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mlflow, "log_metric", _fail_with_a_locked_database)
+    client = TestClient(create_app(FakeChains(), FakeSearcher()))
+    request = _request()
+    request["history"] = [{"role": "assistant", "content": "How long has this been happening?"}]
+
+    response = client.post("/v1/chat", json=request)
+
+    assert response.status_code == 422
+
+
+def test_a_turn_without_a_run_does_not_trace_into_another_turns_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Another turn's run is open. MLflow files a trace that has no run of its own under the
+    # newest open run in any thread, so an untraced fallback is the only safe choice.
+    client = TestClient(create_app(QuestionFromLangChain(), FakeSearcher()))
+    with mlflow.start_run(run_name="another_turn") as other_turn:
+        monkeypatch.setattr(mlflow, "start_run", _fail_with_a_locked_database)
+
+        response = client.post("/v1/chat", json=_request(after_standard_questions=True))
+
+    assert response.status_code == 200
+    assert response.json()["kind"] == "question"
+    assert response.json()["run_id"] is None
+    assert _traces_of(other_turn.info.run_id) == []

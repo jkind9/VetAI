@@ -236,8 +236,8 @@ The longer narrative version of this contract is
 Every handled model, query, search, evidence, or synthesis failure returns the same safe `503` body.
 Internal reasons are logged without owner text, and recorded as tags on the turn's MLflow run.
 Invalid schema or history returns a compact `422` issue. Unexpected errors return the same safe
-wording with `500`. If MLflow cannot open a run for a turn, the turn is answered anyway with
-`run_id: null`, and the error is logged.
+wording with `500`. An MLflow failure never changes the reply: if MLflow cannot open a run, the
+turn is answered anyway with `run_id: null`, and any failed MLflow write is logged and skipped.
 
 Both clients retain the current answer after any non-success. The backend never knows whether the
 owner will manually retry.

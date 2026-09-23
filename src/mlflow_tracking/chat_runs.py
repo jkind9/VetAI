@@ -4,8 +4,8 @@ Every turn is one MLflow run. The run holds the turn's parameters, how long it t
 of reply it gave. Inside the run, one trace holds every LangChain call the turn made: the exact
 prompt sent, the model's reply, and the time each step took.
 
-If MLflow cannot open a run, the turn is answered without one and the error is logged. An MLflow
-write that fails after the run has opened still ends the turn with the 500 service error.
+Recording never changes the reply. If MLflow cannot open a run, the turn is answered untraced and
+the error is logged. Any later MLflow write that fails is logged and skipped.
 
 MLflow writes to MLFLOW_TRACKING_URI when it is set, and otherwise to ./mlflow.db.
 """
@@ -13,6 +13,7 @@ MLflow writes to MLFLOW_TRACKING_URI when it is set, and otherwise to ./mlflow.d
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from time import perf_counter
 from typing import Any
 
@@ -58,33 +59,51 @@ def run_tracked_turn(
 
     `run_params` are recorded as they are, for example the model name. A failed turn's run is
     marked FAILED with the reason, and the error is re-raised. If MLflow cannot open a run, the
-    turn is answered without one and the run id is None.
+    turn is answered untraced and the run id is None. An MLflow write that fails is logged and
+    skipped, so it never changes the reply.
     """
     try:
         run = mlflow.start_run(run_name="chat_turn")
     except MlflowException:
         logger.exception("MLflow could not open a run; answering this turn without one")
-        return run_turn(turn, chains, searcher), None
-    with run:
-        mlflow.log_params(
-            run_params
-            | {"species": turn.intake.species, "answered_questions": len(turn.history) // 2}
-        )
-        started = perf_counter()
-        try:
-            # run_id ties this trace to this run. Without it, MLflow links a new trace to the
-            # latest open run in any thread, which is the wrong run when two turns overlap.
-            with mlflow.start_span(name="chat_turn", run_id=run.info.run_id) as span:
-                span.set_inputs(turn.model_dump(mode="json"))
-                result = run_turn(turn, chains, searcher)
-                span.set_outputs(result.model_dump(mode="json"))
-        except ModelOutputError as error:
-            mlflow.set_tags({"failed_stage": error.stage, "failure_reason": error.reason})
-            raise
-        except Exception as error:  # a rejected history (422) or an unexpected crash (500)
-            mlflow.set_tag("failure_reason", type(error).__name__)
-            raise
-        finally:
-            mlflow.log_metric("turn_seconds", perf_counter() - started)
-        mlflow.set_tag("reply_kind", result.kind)
-    return result, run.info.run_id
+        # With no run to tie it to, MLflow would file this turn's trace under whichever other
+        # turn's run is open. So this turn is not traced. The switch covers this turn only.
+        with mlflow.tracing.context(enabled=False):
+            return run_turn(turn, chains, searcher), None
+
+    run_id = run.info.run_id
+    status = "FAILED"
+    _record(
+        mlflow.log_params,
+        run_params | {"species": turn.intake.species, "answered_questions": len(turn.history) // 2},
+    )
+    started = perf_counter()
+    try:
+        # run_id ties this trace to this run. Without it, MLflow links a new trace to the
+        # latest open run in any thread, which is the wrong run when two turns overlap.
+        with mlflow.start_span(name="chat_turn", run_id=run_id) as span:
+            span.set_inputs(turn.model_dump(mode="json"))
+            result = run_turn(turn, chains, searcher)
+            span.set_outputs(result.model_dump(mode="json"))
+        _record(mlflow.set_tag, "reply_kind", result.kind)
+        status = "FINISHED"
+        return result, run_id
+    except ModelOutputError as error:
+        _record(mlflow.set_tags, {"failed_stage": error.stage, "failure_reason": error.reason})
+        raise
+    except Exception as error:  # a rejected history (422) or an unexpected crash (500)
+        _record(mlflow.set_tag, "failure_reason", type(error).__name__)
+        raise
+    finally:
+        _record(mlflow.log_metric, "turn_seconds", perf_counter() - started)
+        # end_run clears this thread's active run before its database write, so a failed write
+        # leaves the run RUNNING in the store but cannot block the next turn on this thread.
+        _record(mlflow.end_run, status)
+
+
+def _record(write: Callable[..., Any], *args: Any) -> None:
+    """Make one MLflow write. If it fails, log it and carry on: the reply matters more."""
+    try:
+        write(*args)
+    except MlflowException:
+        logger.exception("MLflow could not record part of this turn; the reply is unaffected")

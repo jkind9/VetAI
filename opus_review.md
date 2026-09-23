@@ -647,8 +647,14 @@ its parameters and metrics, and make it safe with a small change:
 - open a new database connection each time (`NullPool`);
 - tag every failed turn with its reason.
 
-A failure after the run has opened, such as the experiment deleted mid-turn, still gives the 500.
-Covering that few-second window would need a larger rewrite.
+A second blind review of that fix found two more gaps, both reproduced and both now fixed:
+
+- **Only opening the run was protected.** A later MLflow write that failed, such as the database
+  being briefly locked, still turned a ready reply, or a 422, into a 500. Every MLflow write is
+  now logged and skipped if it fails.
+- **A turn without a run filed its trace under another turn's run.** That run then held another
+  owner's prompts. A turn answered without a run is now not traced at all, using MLflow's
+  per-turn switch rather than its global one.
 
 ## Reviewer execution plan — fully agreed work only
 

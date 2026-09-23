@@ -75,17 +75,17 @@ Behaviours to know about:
   Docker image. Saving each trace before the turn returns keeps everything in the one database
   file. In the real-model check, turns with no model call still took under 0.1 seconds including
   the save.
-- Opening a run can fail without costing the owner a reply. This follows the usual rule for
-  tracking and telemetry: lose the record rather than change what the app does. Later MLflow
-  writes are not covered yet.
+- Recording never changes the reply. This follows the usual rule for tracking and telemetry:
+  lose the record rather than change what the app does.
   - If MLflow cannot open a run, for example because the database file is read-only, the turn is
     answered without one. The error goes to the server log, and the reply's `run_id` is `null`.
-  - A failure after the run has opened still ends that turn with the 500 service error. Examples:
-    someone deletes the experiment mid-turn, or the database is briefly locked under load. A
-    rejected request (422) can also become a 500 this way.
-  - A turn answered without a run still traces its model calls, and MLflow may file that trace
-    under another turn's open run. So under MLflow trouble, one run can hold another turn's
-    prompts.
+  - That turn is also not traced. With no run to tie it to, MLflow would file the trace under
+    whichever other turn's run is open, so that run would hold another owner's prompts.
+    `mlflow.tracing.context(enabled=False)` switches tracing off for this turn only.
+  - Every later MLflow write (parameters, tags, the time metric, closing the run) is logged and
+    skipped if it fails, for example when the database is briefly locked under load. The owner
+    still gets the reply, the 422 or the 503 they would have got anyway. The run may then be
+    missing a value, or stay RUNNING if closing it failed.
 - The MLflow UI's Delete button only moves the experiment to a bin, and MLflow refuses to use a
   binned experiment or reuse its name. `start_tracking()` brings a binned `vetai-chat` back when
   the server starts.
@@ -102,6 +102,4 @@ Behaviours to know about:
 - per-stage timings as run metrics (they are already visible per span in the trace);
 - a run id in error responses;
 - an analysis script over the recorded runs;
-- moving the live customer-journey test's hand-built recording onto MLflow;
-- making MLflow writes after the run opens unable to fail the turn, and stopping a turn without a
-  run from filing its trace under another run.
+- moving the live customer-journey test's hand-built recording onto MLflow.
