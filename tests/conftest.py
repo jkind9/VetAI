@@ -191,3 +191,26 @@ def standard_history(
 
 def ready_history(*adaptive_pairs: tuple[str, str]) -> list[Message]:
     return standard_history() + history(*adaptive_pairs)
+
+
+def assessment_payload() -> dict[str, Any]:
+    """An `assessment` object exactly as the API sends it to the clients."""
+    return {
+        "outcome": "possible_problem",
+        "outcome_wording": "The information reviewed raised points to discuss with a veterinarian.",
+        "what_you_reported": ["Concern: My dog keeps scratching", "Duration: Two days"],
+        "possible_areas": [{"text": "Skin irritation", "source_ids": ["S1"]}],
+        "suggested_actions": [{"text": "Note when the scratching happens.", "source_ids": ["S1"]}],
+        "questions_for_veterinarian": [{"text": "What should I watch for?", "source_ids": ["S1"]}],
+        "sources": [
+            {
+                "source_id": "S1",
+                "title": "Itchy skin in dogs",
+                "url": "https://vet.cornell.edu/itchy-skin",
+                "organisation": "Cornell University College of Veterinary Medicine",
+            }
+        ],
+        "disclaimer": (
+            "This is not a diagnosis. Please discuss your pet's concern with a veterinarian."
+        ),
+    }
