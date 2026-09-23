@@ -44,6 +44,7 @@ pythonpath = ["src"]
 testpaths = ["tests"]
 markers = [
     "ollama: needs a running local Ollama; skipped unless VETAI_RUN_OLLAMA_SMOKE=1",
+    "live_e2e: production Ollama and live approved-source journeys; skipped unless VETAI_RUN_LIVE_E2E=1",
 ]
 
 [tool.ruff]

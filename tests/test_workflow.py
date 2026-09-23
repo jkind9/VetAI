@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
+import backend.workflow as workflow
 from backend.questions import STANDARD_QUESTIONS
 from backend.schemas import AdaptiveDecision, ModelOutputError, TurnRequest
-import backend.workflow as workflow
 from backend.workflow import ASSESSMENT_SUFFIX, EMERGENCY_NOTICE, run_turn
 from conftest import (
     FakeChains,
@@ -100,7 +100,7 @@ def test_assessment_result_exposes_fixed_wording_for_each_supported_outcome(
     assert result.assessment.outcome_wording == workflow.OUTCOME_WORDING[outcome]
 
 
-def test_after_three_adaptive_answers_makes_final_safety_call_then_searches_without_question() -> None:
+def test_cap_makes_final_safety_call_then_searches_without_question() -> None:
     events: list[str] = []
     chains = FakeChains(adaptive=[{"kind": "ready_for_search"}], events=events)
     searcher = FakeSearcher(events=events)
@@ -139,6 +139,26 @@ def test_after_three_adaptive_answers_final_safety_call_can_escalate() -> None:
     assert result.reply == EMERGENCY_NOTICE
     assert events == ["adaptive"]
     assert chains.adaptive_calls[0][1] == "ready_or_escalate"
+    assert chains.plan_calls == []
+    assert searcher.calls == []
+
+
+def test_cap_rejects_a_fourth_question_before_search() -> None:
+    chains = FakeChains(adaptive=[{"kind": "question", "question": "Another question?"}])
+    searcher = FakeSearcher()
+    request = TurnRequest(
+        intake=intake(),
+        history=ready_history(
+            ("Question one?", "Answer one"),
+            ("Question two?", "Answer two"),
+            ("Question three?", "Answer three"),
+        ),
+    )
+
+    with pytest.raises(ModelOutputError) as raised:
+        run_turn(request, chains, searcher)
+
+    assert raised.value.reason == "invalid_model_output"
     assert chains.plan_calls == []
     assert searcher.calls == []
 

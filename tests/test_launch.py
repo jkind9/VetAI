@@ -13,7 +13,7 @@ def test_desktop_module_is_importable_without_pytest_path_configuration() -> Non
     environment.pop("PYTHONPATH", None)
 
     completed = subprocess.run(
-        [sys.executable, "-c", "import frontend.app"],
+        [sys.executable, "-c", "import frontend.local.app"],
         capture_output=True,
         check=False,
         cwd=Path(__file__).parents[1],

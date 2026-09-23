@@ -1,0 +1,19 @@
+{
+  "name": "vetai-public-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser client for the VetAI pet concern demo, so a reviewer needs no Python, Qt, or Ollama install.",
+  "scripts": {
+    "dev": "node node_modules/vite/bin/vite.js",
+    "build": "node node_modules/vite/bin/vite.js build",
+    "preview": "node node_modules/vite/bin/vite.js preview",
+    "test:e2e": "npm run build && node node_modules/@playwright/test/cli.js test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "svelte": "^5.19.0",
+    "vite": "^6.0.7"
+  }
+}

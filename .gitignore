@@ -2,6 +2,9 @@
 mlruns/
 mlartifacts/
 
+# Recorded real-model journey outputs are review evidence, not repository fixtures.
+artifacts/live-journeys/
+
 # Environments and caches
 .venv/
 __pycache__/

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from backend.error_handling import register_error_handlers
 from backend.model import OllamaChatModel
@@ -30,7 +32,22 @@ def create_app(chains: Any, searcher: Any) -> FastAPI:
         payload["run_id"] = None
         return payload
 
+    _serve_browser_client(app)
     return app
+
+
+PUBLIC_CLIENT_DIST = Path(__file__).resolve().parents[1] / "frontend" / "public" / "dist"
+
+
+def _serve_browser_client(app: FastAPI, dist: Path = PUBLIC_CLIENT_DIST) -> None:
+    """Serve the built Svelte page at `/`, if it has been built.
+
+    Mounted last so `/v1/chat`, `/health` and `/docs` keep priority, and skipped when `dist/` is
+    absent so the backend still starts for anyone using only the desktop client. Sharing one origin
+    with the API is what removes any CORS configuration from this project.
+    """
+    if dist.is_dir():
+        app.mount("/", StaticFiles(directory=dist, html=True), name="public_client")
 
 
 def create_runtime_app(settings: BackendSettings | None = None) -> FastAPI:
