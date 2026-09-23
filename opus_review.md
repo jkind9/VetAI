@@ -504,7 +504,8 @@ Lines that are hard to justify:
 
 - Search failures (problem 3): fixed in commits `65bb2d3` and `8db564b` by a parallel session.
   > **Reviewer comment — Agree and verified.** Keep the long-title problem open separately.
-- Desktop client: updated to the current API (task 04 on the local task board), not yet committed.
+- Desktop client: updated to the current API (task 04 on the local task board), committed as
+  `c635c5e`; not pushed.
   > **Reviewer comment — Agree.** The current offline suite covers the new contract, and the latest
   > working tree now passes Ruff.
   - The form now asks only for species and concern.
@@ -518,8 +519,9 @@ Lines that are hard to justify:
   - A new test sends the desktop's own requests to the real backend code, so the two can't drift
     apart unnoticed again.
     > **Reviewer comment — Agree.** This is the right regression boundary.
-- MLflow: first slice done (task 05 on the local task board), not yet committed. All MLflow code
-  is in `src/mlflow_tracking/`, not `src/mlflow/`: tests put `src/` first on the import path, so a
+- MLflow: first slice done (task 05 on the local task board), committed as `61ce637`; not pushed.
+  The run-safety fixes in "Found while fixing", item 8, came after that commit. All MLflow code is
+  in `src/mlflow_tracking/`, not `src/mlflow/`: tests put `src/` first on the import path, so a
   folder named `mlflow` would hide the real library.
   > **Reviewer comment — Agree.** The package name avoids shadowing the third-party dependency.
   - Each chat turn is one MLflow run. It records the model, the prompt-file hashes, the species,
@@ -620,6 +622,33 @@ server starts (`uvicorn --factory`) would remove the workaround.
 
 **Owner decision (2026-09-23).** We are not doing a Docker deployment. The files stay as an example
 of how we would do it, and the README says so. They are not tested as part of this project.
+
+### 8. Recording a turn in MLflow could cost the owner their reply
+
+An independent review of the first MLflow commit found three ways the per-turn run broke the chat.
+Each was reproduced.
+
+- **Deleting the experiment in the MLflow UI broke every turn.** MLflow's Delete button only moves
+  an experiment to a bin. MLflow then refuses to add runs to it, and refuses to select it at
+  startup. The first version failed loudly, so every turn, including emergency notices, returned a
+  500, and the server would not start.
+- **Many turns at once exhausted MLflow's database connections.** With 48 turns arriving together,
+  requests failed after a 30-second wait.
+- **Rejected requests showed as unexplained failures.** A 422 or an unexpected 500 was recorded as
+  a FAILED run with no reason.
+
+The standard answer is that tracking must never change what the app does. OpenTelemetry's
+error-handling rules say instrumentation must not throw into the application, and MLflow's own
+tracing drops a failed trace and logs it. The owner chose to keep the brief's per-turn run, with
+its parameters and metrics, and make it safe with a small change:
+
+- restore a deleted experiment when the server starts;
+- answer a turn without a run, with the error logged, when MLflow cannot open one;
+- open a new database connection each time (`NullPool`);
+- tag every failed turn with its reason.
+
+A failure after the run has opened, such as the experiment deleted mid-turn, still gives the 500.
+Covering that few-second window would need a larger rewrite.
 
 ## Reviewer execution plan — fully agreed work only
 

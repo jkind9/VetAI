@@ -66,7 +66,7 @@ turn, and the Traces tab has one trace per turn.
   returns the result with the run's id. The chat route in `backend/app.py` calls it for every
   request.
 
-Three behaviours to know about:
+Behaviours to know about:
 
 - MLflow links a new trace to the latest open run in any thread. When two turns overlap, that is
   the wrong run. So the turn's span is started with `run_id=`, which ties its trace to its own run.
@@ -75,9 +75,26 @@ Three behaviours to know about:
   Docker image. Saving each trace before the turn returns keeps everything in the one database
   file. In the real-model check, turns with no model call still took under 0.1 seconds including
   the save.
-- If MLflow cannot write, for example because the database file is read-only, the turn fails with
-  the 500 service error. That happens even when the turn already had an answer, including an
-  emergency notice. The turn fails loudly rather than answering without a record.
+- Opening a run can fail without costing the owner a reply. This follows the usual rule for
+  tracking and telemetry: lose the record rather than change what the app does. Later MLflow
+  writes are not covered yet.
+  - If MLflow cannot open a run, for example because the database file is read-only, the turn is
+    answered without one. The error goes to the server log, and the reply's `run_id` is `null`.
+  - A failure after the run has opened still ends that turn with the 500 service error. Examples:
+    someone deletes the experiment mid-turn, or the database is briefly locked under load. A
+    rejected request (422) can also become a 500 this way.
+  - A turn answered without a run still traces its model calls, and MLflow may file that trace
+    under another turn's open run. So under MLflow trouble, one run can hold another turn's
+    prompts.
+- The MLflow UI's Delete button only moves the experiment to a bin, and MLflow refuses to use a
+  binned experiment or reuse its name. `start_tracking()` brings a binned `vetai-chat` back when
+  the server starts.
+- MLflow's default pool of 15 shared database connections ran out when about 48 turns arrived at
+  once: requests failed after a 30-second wait. `start_tracking()` makes MLflow open a new
+  connection for each use (`NullPool`).
+- Every failed turn's run says why. A model, search or grounding failure records `failed_stage`
+  and `failure_reason`. A rejected history (422) or an unexpected crash (500) records the error's
+  type as `failure_reason`.
 
 ## Not done yet
 
@@ -85,4 +102,6 @@ Three behaviours to know about:
 - per-stage timings as run metrics (they are already visible per span in the trace);
 - a run id in error responses;
 - an analysis script over the recorded runs;
-- moving the live customer-journey test's hand-built recording onto MLflow.
+- moving the live customer-journey test's hand-built recording onto MLflow;
+- making MLflow writes after the run opens unable to fail the turn, and stopping a turn without a
+  run from filing its trace under another run.

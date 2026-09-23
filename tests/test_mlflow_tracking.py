@@ -13,13 +13,14 @@ import pytest
 from fastapi.testclient import TestClient
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.prompts import ChatPromptTemplate
+from mlflow import MlflowClient
 from mlflow.entities import Run, Trace
 
 from backend.app import create_app
 from backend.error_handling import SERVICE_ERROR_TEXT
 from backend.schemas import AdaptiveDecision, ModelOutputError, QuestionMode, TurnRequest
 from conftest import FakeChains, FakeSearcher, standard_history
-from mlflow_tracking.chat_runs import start_tracking
+from mlflow_tracking.chat_runs import EXPERIMENT_NAME, start_tracking
 
 QUESTION_CHAIN = ChatPromptTemplate.from_messages(
     [("human", "Ask one question about: {concern}")]
@@ -63,6 +64,23 @@ def _traces_of(run_id: str) -> list[Trace]:
 
 def _root_span(trace: Trace) -> Any:
     return next(span for span in trace.data.spans if span.parent_id is None)
+
+
+def _delete_the_experiment() -> None:
+    """What the MLflow UI's Delete button does: move the experiment to MLflow's bin."""
+    client = MlflowClient()
+    client.delete_experiment(client.get_experiment_by_name(EXPERIMENT_NAME).experiment_id)
+
+
+@pytest.fixture
+def restore_the_experiment_afterwards():
+    """Later tests need the experiment, so bring it back even if a test fails."""
+    yield
+    client = MlflowClient()
+    experiment = client.get_experiment_by_name(EXPERIMENT_NAME)
+    if experiment.lifecycle_stage == "deleted":
+        client.restore_experiment(experiment.experiment_id)
+    mlflow.set_experiment(EXPERIMENT_NAME)
 
 
 def test_each_turn_is_one_finished_run() -> None:
@@ -151,3 +169,63 @@ def test_overlapping_turns_keep_their_own_traces(monkeypatch: pytest.MonkeyPatch
         traces = _traces_of(run_id)
         assert len(traces) == 1
         assert _root_span(traces[0]).inputs["intake"]["concern"] == concern
+
+
+def test_a_deleted_experiment_is_restored_when_tracking_starts(
+    restore_the_experiment_afterwards,
+) -> None:
+    _delete_the_experiment()
+
+    start_tracking()
+
+    experiment = MlflowClient().get_experiment_by_name(EXPERIMENT_NAME)
+    assert experiment.lifecycle_stage == "active"
+
+
+def test_a_turn_is_still_answered_when_its_run_cannot_be_opened(
+    restore_the_experiment_afterwards,
+) -> None:
+    _delete_the_experiment()
+    client = TestClient(create_app(FakeChains(), FakeSearcher()))
+
+    response = client.post("/v1/chat", json=_request("My dog collapsed"))
+
+    assert response.status_code == 200
+    assert response.json()["kind"] == "emergency_notice"
+    assert response.json()["run_id"] is None
+
+
+def test_a_rejected_history_is_recorded_with_its_reason() -> None:
+    client = TestClient(create_app(FakeChains(), FakeSearcher()))
+    request = _request()
+    request["history"] = [{"role": "assistant", "content": "How long has this been happening?"}]
+
+    response = client.post("/v1/chat", json=request)
+
+    run = _newest_run()
+    assert response.status_code == 422
+    assert run.info.status == "FAILED"
+    assert run.data.tags["failure_reason"] == "InvalidTurnRequest"
+
+
+def test_many_turns_at_once_are_all_answered_and_recorded() -> None:
+    # 48 model turns at once used to exhaust MLflow's shared pool of 15 database connections:
+    # some requests failed after a 30-second wait and some runs lost their trace.
+    start_tracking()
+    client = TestClient(create_app(QuestionFromLangChain(), FakeSearcher()))
+    all_ready = threading.Barrier(48, timeout=10)
+    replies: list[dict[str, Any]] = []
+
+    def send(number: int) -> None:
+        request = _request(f"Dog {number} is scratching", after_standard_questions=True)
+        all_ready.wait()
+        replies.append(client.post("/v1/chat", json=request).json())
+
+    threads = [threading.Thread(target=send, args=(number,)) for number in range(48)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert [reply.get("kind") for reply in replies] == ["question"] * 48
+    assert all(len(_traces_of(reply["run_id"])) == 1 for reply in replies)
