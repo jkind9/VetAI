@@ -14,7 +14,7 @@ import httpx
 from backend.approved_sources import ApprovedSourceCatalog
 from backend.schemas import EvidenceItem, ModelOutputError, SearchPlan
 
-MAX_RAW_RESULTS = 12
+MAX_RAW_RESULTS = 3
 MAX_EVIDENCE_ITEMS = 4
 MAX_PAGE_BYTES = 500_000
 MAX_EXCERPT_CHARS = 4000

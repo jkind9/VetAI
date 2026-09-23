@@ -178,9 +178,17 @@ def test_search_requests_only_three_raw_results_per_query() -> None:
         ),
     )
 
-    searcher.search(SearchPlan(queries=["dog concern veterinary"]))
+    searcher.search(
+        SearchPlan(
+            queries=[
+                "dog concern one",
+                "dog concern two",
+                "dog concern three",
+            ]
+        )
+    )
 
-    assert client.call_kwargs[0]["max_results"] == 3
+    assert [kwargs["max_results"] for kwargs in client.call_kwargs] == [3, 3, 3]
 
 
 def test_query_provider_failure_does_not_discard_earlier_approved_result() -> None:
