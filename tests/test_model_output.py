@@ -7,6 +7,7 @@ import pytest
 from backend.schemas import (
     AdaptiveDecision,
     AssessmentDraft,
+    EmergencyCheck,
     Message,
     ModelOutputError,
     SearchPlan,
@@ -16,11 +17,20 @@ from backend.workflow import run_turn
 from conftest import FakeChains, FakeSearcher, assessment_draft, intake, ready_history
 
 
-def test_urgent_escalation_decision_has_no_question() -> None:
-    decision = AdaptiveDecision(kind="urgent_escalation")
+def test_adaptive_decision_rejects_urgent_escalation() -> None:
+    with pytest.raises(ValueError):
+        AdaptiveDecision(kind="urgent_escalation")
 
-    assert decision.kind == "urgent_escalation"
-    assert decision.question is None
+
+@pytest.mark.parametrize("value", ["true", 1, 0, None])
+def test_emergency_check_requires_a_boolean(value: object) -> None:
+    with pytest.raises(ValueError):
+        EmergencyCheck.model_validate({"emergency": value})
+
+
+def test_emergency_check_rejects_extra_fields() -> None:
+    with pytest.raises(ValueError):
+        EmergencyCheck.model_validate({"emergency": True, "reason": "model prose"})
 
 
 @pytest.mark.parametrize("raw", [None, "question", {}, {"kind": "question"}])

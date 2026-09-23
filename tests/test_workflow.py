@@ -20,8 +20,9 @@ from conftest import (
 
 
 @pytest.mark.parametrize("completed", [0, 1, 2])
-def test_three_standard_questions_are_returned_without_model_or_search(completed: int) -> None:
-    chains = FakeChains()
+def test_the_model_check_runs_before_each_fixed_question(completed: int) -> None:
+    events: list[str] = []
+    chains = FakeChains(events=events)
     searcher = FakeSearcher()
     answers = ["Today", "No", "It comes and goes"]
     pairs = [(STANDARD_QUESTIONS[i].text, answers[i]) for i in range(completed)]
@@ -33,6 +34,10 @@ def test_three_standard_questions_are_returned_without_model_or_search(completed
     assert result.reply == expected.text
     assert result.question_type == "standard"
     assert result.question_id == expected.id
+    assert events == ["emergency_check"]
+    assert chains.emergency_calls == [
+        TurnRequest(intake=intake(), history=history(*pairs))
+    ]
     assert chains.adaptive_calls == []
     assert chains.plan_calls == []
     assert searcher.calls == []
@@ -53,6 +58,24 @@ def test_the_first_adaptive_question_is_mandatory() -> None:
     assert searcher.calls == []
 
 
+def test_the_model_check_runs_on_the_first_turn() -> None:
+    events: list[str] = []
+    chains = FakeChains(emergency=[{"emergency": True}], events=events)
+    searcher = FakeSearcher(events=events)
+
+    result = run_turn(
+        TurnRequest(intake=intake("My dog is dieing"), history=[]), chains, searcher
+    )
+
+    assert result.kind == "emergency_notice"
+    assert result.reply == EMERGENCY_NOTICE
+    assert result.emergency_rule == "model_emergency_check"
+    assert events == ["emergency_check"]
+    assert chains.adaptive_calls == []
+    assert chains.plan_calls == []
+    assert searcher.calls == []
+
+
 def test_ready_after_one_adaptive_answer_runs_plan_search_then_synthesis() -> None:
     events: list[str] = []
     chains = FakeChains(
@@ -66,7 +89,7 @@ def test_ready_after_one_adaptive_answer_runs_plan_search_then_synthesis() -> No
 
     result = run_turn(request, chains, searcher)
 
-    assert events == ["adaptive", "plan", "search", "synthesis"]
+    assert events == ["emergency_check", "adaptive", "plan", "search", "synthesis"]
     assert chains.adaptive_calls[0][1] == "question_or_ready"
     assert result.kind == "assessment"
     assert result.assessment is not None
@@ -117,8 +140,26 @@ def test_after_three_adaptive_answers_the_model_is_not_asked_again() -> None:
     result = run_turn(request, chains, searcher)
 
     assert result.kind == "assessment"
-    assert events == ["plan", "search", "synthesis"]
+    assert events == ["emergency_check", "plan", "search", "synthesis"]
     assert chains.adaptive_calls == []
+
+
+def test_the_last_answer_is_checked_before_search() -> None:
+    events: list[str] = []
+    chains = FakeChains(
+        emergency=[{"emergency": True}], adaptive=[], events=events
+    )
+    searcher = FakeSearcher(events=events)
+    request = TurnRequest(intake=intake(), history=ready_history(*THREE_ADAPTIVE_PAIRS))
+
+    result = run_turn(request, chains, searcher)
+
+    assert result.kind == "emergency_notice"
+    assert result.emergency_rule == "model_emergency_check"
+    assert events == ["emergency_check"]
+    assert chains.adaptive_calls == []
+    assert chains.plan_calls == []
+    assert searcher.calls == []
 
 
 def test_an_emergency_phrase_in_the_third_answer_still_stops_the_chat() -> None:
@@ -145,22 +186,37 @@ def test_ready_is_rejected_before_one_adaptive_answer() -> None:
     assert raised.value.reason == "question_required"
 
 
-def test_adaptive_model_can_escalate_a_typo_not_seen_by_phrase_rules() -> None:
+def test_the_dedicated_model_check_can_escalate_a_typo_not_seen_by_phrase_rules() -> None:
     events: list[str] = []
-    chains = FakeChains(adaptive=[{"kind": "urgent_escalation"}], events=events)
+    chains = FakeChains(emergency=[{"emergency": True}], events=events)
     searcher = FakeSearcher(events=events)
 
     result = run_turn(
-        TurnRequest(intake=intake("My dog is dieing"), history=standard_history()),
+        TurnRequest(intake=intake("My dog is dieing"), history=[]),
         chains,
         searcher,
     )
 
     assert result.kind == "emergency_notice"
     assert result.reply == EMERGENCY_NOTICE
-    assert events == ["adaptive"]
+    assert result.emergency_rule == "model_emergency_check"
+    assert events == ["emergency_check"]
+    assert chains.adaptive_calls == []
     assert chains.plan_calls == []
     assert searcher.calls == []
+
+
+def test_a_failed_check_stops_the_turn() -> None:
+    failure = ModelOutputError("timeout", stage="emergency_check")
+    chains = FakeChains(emergency=[failure])
+
+    with pytest.raises(ModelOutputError) as raised:
+        run_turn(TurnRequest(intake=intake(), history=[]), chains, FakeSearcher())
+
+    assert raised.value is failure
+    assert raised.value.stage == "emergency_check"
+    assert chains.adaptive_calls == []
+    assert chains.plan_calls == []
 
 
 def test_warning_in_any_owner_answer_bypasses_every_chain_and_search() -> None:
@@ -175,6 +231,7 @@ def test_warning_in_any_owner_answer_bypasses_every_chain_and_search() -> None:
 
     assert result.kind == "emergency_notice"
     assert result.reply == EMERGENCY_NOTICE
+    assert chains.emergency_calls == []
     assert chains.adaptive_calls == []
     assert chains.plan_calls == []
     assert searcher.calls == []
@@ -192,5 +249,6 @@ def test_initial_emergency_still_bypasses_every_stage() -> None:
 
     assert result.kind == "emergency_notice"
     assert result.emergency_rule == "suspected_ingestion"
+    assert chains.emergency_calls == []
     assert chains.adaptive_calls == []
     assert searcher.calls == []

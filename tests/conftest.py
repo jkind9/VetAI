@@ -90,11 +90,13 @@ class FakeChains:
     def __init__(
         self,
         *,
+        emergency: list[Any] | None = None,
         adaptive: list[Any] | None = None,
         plans: list[Any] | None = None,
         assessments: list[Any] | None = None,
         events: list[str] | None = None,
     ) -> None:
+        self.emergency_replies = None if emergency is None else list(emergency)
         self.adaptive_replies = list(
             adaptive
             if adaptive is not None
@@ -110,10 +112,23 @@ class FakeChains:
         self.assessment_replies = list(
             assessments if assessments is not None else [assessment_draft()]
         )
+        self.emergency_calls: list[TurnRequest] = []
         self.adaptive_calls: list[tuple[TurnRequest, QuestionMode]] = []
         self.plan_calls: list[TurnRequest] = []
         self.synthesis_calls: list[tuple[TurnRequest, list[EvidenceItem]]] = []
         self.events = events if events is not None else []
+
+    def check_for_emergency(self, turn: TurnRequest) -> Any:
+        self.events.append("emergency_check")
+        self.emergency_calls.append(turn)
+        if self.emergency_replies is None:
+            return {"emergency": False}
+        if not self.emergency_replies:
+            raise AssertionError("unexpected emergency-check call")
+        reply = self.emergency_replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
 
     def propose_adaptive_question(self, turn: TurnRequest, mode: QuestionMode) -> Any:
         self.events.append("adaptive")
