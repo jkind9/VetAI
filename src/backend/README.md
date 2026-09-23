@@ -1,6 +1,6 @@
 # Backend core
 
-This folder owns the ordered conversation, emergency routing, three LangChain/Ollama stages,
+This folder owns the ordered conversation, emergency routing, four LangChain/Ollama stages,
 approved-source retrieval, grounding validation, and HTTP composition. Each turn is recorded in
 MLflow by the separate [`../mlflow_tracking/`](../mlflow_tracking/README.md) package, which the chat
 route in `app.py` calls.
@@ -11,7 +11,7 @@ route in `app.py` calls.
 | `workflow.py` | Phase inference, emergency-first ordering, caps, orchestration, citation validation |
 | `safeguards.py` | Curated warning-phrase matcher; imports nothing from the project |
 | `schemas.py` | Request, chain output, evidence, assessment, result, limits, and error types |
-| `model.py` | Three structured-output LangChain chains backed by one Ollama model, plus prompt loading |
+| `model.py` | Four structured-output LangChain chains backed by one Ollama model, plus prompt loading |
 | `approved_sources.py` | Source catalog loading and exact host/subdomain checks |
 | `search.py` | Query privacy validation, web search, result filtering, bounded extraction |
 | `app.py` | FastAPI routes, runtime dependency composition, MLflow wrapping, and optional browser-client hosting |
@@ -28,61 +28,68 @@ Three important inputs live outside this folder:
 
 ```mermaid
 flowchart TD
-    request["TurnRequest: species, concern, complete active history"]
-    valid{"Request and history valid?"}
-    input_error["422 correction; no downstream call"]
-    emergency{"Curated warning phrase in owner text?"}
-    emergency_notice["Fixed emergency notice; end"]
-    standard{"All 3 fixed questions answered?"}
-    standard_question["Return next fixed standard question"]
-    adaptive_count{"How many adaptive questions have answers?"}
-    adaptive["Adaptive-decision chain, with mode set by count"]
-    adaptive_result{"Decision kind?"}
-    adaptive_question["Return model-generated adaptive question"]
-    query["Search-query chain"]
-    search["Approved-source search and extraction"]
-    evidence{"Usable approved evidence?"}
-    synthesis["Evidence-synthesis chain"]
-    grounding{"Structure and source IDs valid?"}
-    assessment["Structured assessment; end"]
-    service_error["503; preserve draft; manual retry"]
+    subgraph questions["1. Question loop"]
+        request["Owner sends concern or answers one question"]
+        safety["Phrase gate; if clear, run standalone model emergency check"]
+        phase{"Completed question/answer pairs"}
+        fixed["0-2: return next fixed question"]
+        adaptive["Adaptive chain: pair 3 must ask; pairs 4-5 ask or ready"]
+        answer["Owner answers in a new POST /v1/chat"]
 
-    request --> valid
-    valid -->|no| input_error
-    valid -->|yes| emergency
-    emergency -->|yes| emergency_notice
-    emergency -->|no| standard
-    standard -->|no: 0, 1, or 2 complete| standard_question
-    standard -->|yes| adaptive_count
-    adaptive_count -->|0: question_required| adaptive
-    adaptive_count -->|1 or 2: question_or_ready| adaptive
-    adaptive_count -->|3: limit reached, no model call| query
-    adaptive --> adaptive_result
-    adaptive_result -->|urgent| emergency_notice
-    adaptive_result -->|question, when mode permits| adaptive_question
-    adaptive_result -->|ready, after at least 1 adaptive answer| query
-    adaptive_result -->|invalid or disallowed for mode| service_error
-    query -->|invalid/failure| service_error
-    query --> search
-    search --> evidence
-    evidence -->|no| service_error
-    evidence -->|yes| synthesis
-    synthesis --> grounding
-    grounding -->|no| service_error
-    grounding -->|yes| assessment
+        request --> safety
+        safety -->|no emergency| phase
+        phase --> fixed
+        phase --> adaptive
+        fixed --> answer
+        adaptive -->|ask| answer
+        answer --> request
+    end
+
+    subgraph searching["2. Search chain"]
+        query["Generate search queries"]
+        search["Approved-source search and extraction"]
+        evidence["Validated evidence"]
+        query --> search --> evidence
+    end
+
+    subgraph summary["3. Summary + recommendations"]
+        synthesis["Evidence-synthesis chain"]
+        assessment["Grounded owner-visible result"]
+        synthesis --> assessment
+    end
+
+    emergency_notice["Fixed emergency notice; end"]
+
+    safety -->|emergency| emergency_notice
+    adaptive -->|ready| query
+    phase -->|6: adaptive cap reached| query
+    evidence --> synthesis
 ```
 
 A **completed pair** means two adjacent history messages: an assistant question followed by the
-owner's answer. A **standard pair** is one of those exchanges where the assistant text exactly
-matches the corresponding fixed question in `STANDARD_QUESTIONS`. Therefore the old diagram label
-“fewer than 3 standard pairs” meant: if only zero, one, or two fixed questions have been answered,
-return the next fixed question. It did not refer to search-result pairs or model outputs.
+owner's answer. Each request returns at most one question; the backend does not loop internally.
+The client sends the answer in a new request, which starts again at the two emergency checks. Pairs
+zero to two select the next fixed question. Pair three requires the first adaptive question; pairs
+four and five allow the adaptive chain to ask or declare readiness; pair six goes directly to
+search without another adaptive call. Failure exits are omitted from this overview: a required
+model or search stage that fails ends the request with the shared `503` contract.
 
-The deterministic emergency gate always precedes questions, models, and search. It scans only the
-concern and owner answers; assistant wording, search queries, retrieved content, and model output
-are excluded. If no phrase matches, the adaptive model can still choose `urgent_escalation` from
-context or misspelled wording. Both routes return the same application-owned notice and neither can
-be lowered by another stage. Search never decides an emergency.
+Every turn starts with the phrase gate; every turn that survives it then runs the model check before
+anything else happens:
+
+1. **The phrase gate** (`safeguards.py`): plain Python, no model. It scans only the concern and
+   owner answers; assistant wording, search queries, retrieved content, and model output are
+   excluded. A match ends the turn at once.
+2. **The emergency-check chain**: one model call whose only job is to decide whether the
+   owner-reported signs may need an emergency vet now. It runs on every unmatched turn from the
+   first message, so it sees the concern before the first fixed question and the last answer before
+   search. It catches what the phrase list misses: pet names ("Max collapsed"), contractions,
+   misspellings, and signs the list does not name. When unsure it answers yes.
+
+Both routes return the same application-owned notice, and neither can be lowered by another stage.
+The follow-up question chain cannot raise an emergency; that is the check's job alone. Search never
+decides an emergency. A failed check is a `503`, never a pass: a turn does not continue without its
+emergency check.
 
 ## Phase inference and history
 
@@ -105,22 +112,24 @@ but a stateless custom client can still alter later history.
 
 ## Chain boundaries
 
-`model.py` exposes three methods over one configured local Ollama model:
+`model.py` exposes four methods over one configured local Ollama model:
 
 ```python
+chains.check_for_emergency(turn)
 chains.propose_adaptive_question(turn, mode)
 chains.generate_search_plan(turn)
 chains.synthesise_assessment(turn, evidence)
 ```
 
-The adaptive chain escalates, asks one question, or indicates readiness. The first call uses
-`question_required` and the next two use `question_or_ready`. Both modes permit escalation and a
-question; only `question_or_ready` permits readiness. There is no call at the cap. The query chain sees the answered history and returns one to three neutral queries. At
+The emergency-check chain returns `EmergencyCheck(emergency: bool)` and nothing else on every turn
+not ended by the phrase gate. The adaptive chain asks one question or indicates readiness. The first
+call uses `question_required` and the next two use `question_or_ready`. Both modes permit a question; only
+`question_or_ready` permits readiness. There is no adaptive call at the cap. The query chain sees the answered history and returns one to three neutral queries. At
 least one query must explicitly compare whether the main sign is normal/expected versus
 concerning/abnormal. The synthesis chain runs after retrieval and receives bounded, untrusted
 evidence blocks identified by source ID.
 
-All three prompt files use `<!-- system -->` and `<!-- human -->` markers. `PromptFile.load` splits
+All four prompt files use `<!-- system -->` and `<!-- human -->` markers. `PromptFile.load` splits
 on those markers, and `app.py` records each file's SHA-256 on every MLflow run. That makes the exact
 prompt version used for a result inspectable without copying prompt text into configuration.
 
@@ -175,6 +184,7 @@ source policy and privacy boundary.
 
 | Boundary | Current limit | Enforced in |
 | --- | ---: | --- |
+| Emergency checks | phrase gate every turn; one model check if the gate does not match | `safeguards.py`, `workflow.py` |
 | Standard questions | exactly 3 before adaptive questioning | `questions.py`, `workflow.py` |
 | Adaptive questions answered | minimum 1, maximum 3 before search | `workflow.py`, `schemas.py` |
 | Complete history | maximum 6 pairs / 12 messages | `schemas.py` |
@@ -197,8 +207,9 @@ source policy and privacy boundary.
 | Odd/out-of-order/over-limit history | Raise `InvalidTurnRequest` | `422`, correct/restart history | No | Stable history message |
 | Wrong standard-question prefix | Reject altered/skipped phase | `422`, correct/restart history | No | No inferred replacement |
 | Emergency phrase in owner text | Return fixed notice; skip all later work | `200 emergency_notice`; end | No | Fixed application text |
-| Standard-question stage | Return next catalog item | `200 question` | N/A | Exact deterministic wording |
-| Model identifies urgent context missed by phrase matching | Return the same fixed notice; skip query/search/synthesis | `200 emergency_notice`; end | No | Model supplies no owner-visible wording |
+| Emergency-check chain answers true | Return the same fixed notice; skip every later stage | `200 emergency_notice`; end | No | Model supplies no owner-visible wording |
+| Emergency-check chain fails, times out, or returns malformed output | Raise `ModelOutputError` with stage `emergency_check`; never treat it as "no emergency" | Same `503`, preserve draft, **Try again** | No | No question is shown without a completed check |
+| Standard-question stage | Return next catalog item, after both emergency checks | `200 question` | N/A | Exact deterministic wording |
 | Required first adaptive call says ready | Raise `ModelOutputError(invalid_model_output)` | `503`, preserve draft, **Try again** | No | No substitute question |
 | Malformed/blank/overlong adaptive output | Reject it | Same `503` | No | Raw output hidden |
 | Model timeout | Raise `ModelOutputError(timeout)` | Same `503` | No | No default question/assessment |

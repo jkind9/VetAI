@@ -1,7 +1,7 @@
 # Source layout
 
 The [backend](backend/README.md) owns validation, the emergency-first workflow, the deterministic
-question prefix, three LangChain/Ollama stages, approved-source retrieval, grounding, and HTTP
+question prefix, four LangChain/Ollama stages, approved-source retrieval, grounding, and HTTP
 composition. Uvicorn launches `backend.app:app`.
 
 The [frontend](frontend/README.md) is two clients over one API: a native PySide6 desktop window in

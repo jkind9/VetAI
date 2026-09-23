@@ -14,6 +14,7 @@ from backend.app import create_app
 from backend.schemas import (
     AdaptiveDecision,
     AssessmentDraft,
+    EmergencyCheck,
     EvidenceItem,
     GroundedItem,
     ModelOutputError,
@@ -35,6 +36,9 @@ class ScenarioChains:
     def __init__(self) -> None:
         self.failed_concerns: set[str] = set()
 
+    def check_for_emergency(self, turn: TurnRequest) -> EmergencyCheck:
+        return EmergencyCheck(emergency="dieing" in turn.intake.concern.casefold())
+
     def propose_adaptive_question(
         self, turn: TurnRequest, mode: QuestionMode
     ) -> AdaptiveDecision:
@@ -44,8 +48,6 @@ class ScenarioChains:
             raise ModelOutputError(
                 "model_call_failed", "deterministic E2E failure", stage="adaptive"
             )
-        if "dieing" in concern:
-            return AdaptiveDecision(kind="urgent_escalation")
         answered_adaptive = max(0, (len(turn.history) // 2) - 3)
         if "persistent" in concern:
             return AdaptiveDecision(

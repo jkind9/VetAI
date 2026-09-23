@@ -14,7 +14,8 @@ The owner gets:
 3. between one and three adaptive LLM questions;
 4. a source-grounded `possible_problem` or `nothing_flagged` result split into reported facts,
    possible areas, suggested actions, questions for a veterinarian, and sources; or
-5. a fixed emergency notice when either the narrow phrase matcher or the adaptive model escalates.
+5. a fixed emergency notice when either the narrow phrase matcher or the dedicated model emergency
+   check escalates. Both are part of every turn; a phrase match ends the turn before the model call.
 
 The original brief prioritises LangChain usage and engineering internals over interface polish.
 This design therefore makes the distinct LangChain stages and their boundaries visible and
@@ -24,31 +25,34 @@ turn's chain calls traced inside it.
 ## 2. Ordered conversation
 
 ```text
-species + concern
+owner concern or answer (one POST /v1/chat turn)
       |
       v
 validate request and history
       |
       v
-scan all owner-authored text for curated emergency phrases
+scan all owner-authored text for curated emergency phrases     <-- every turn
       | match
       +--------------------------> fixed emergency notice; end
       |
       v
-three deterministic standard questions
-      |
-      v
-adaptive-question chain: question / ready / urgent escalation
-      | urgent
+standalone emergency-check chain: may the reported signs      <-- every turn
+need an emergency vet now?
+      | true (or unsure)
       +--------------------------> fixed emergency notice; end
+      | check fails
+      +--------------------------> 503; owner may retry
       |
       v
-minimum 1, maximum 3 answered adaptive questions
+choose the current question-loop phase
+      +-- fixed question due --> return next fixed question --> owner answers --> next turn
       |
-      v
-ready decision, including final ready-or-escalate check at the cap
-      |
-      v
+      +-- 0 to 2 adaptive answers --> adaptive-question chain
+      |                                  +-- question --> owner answers --> next turn
+      |                                  +-- ready --+
+      |                                              |
+      +-- 3 adaptive answers: no adaptive call ------+
+                                                     v
 search-query chain (neutral, short queries derived from all answers)
       |
       v
@@ -61,28 +65,42 @@ post-search evidence-synthesis chain
 structured assessment; end
 ```
 
+The emergency-check chain is therefore a standalone link *inside* the question loop, not an option
+on the adaptive-question chain. Every owner answer starts a new turn and passes through the phrase
+gate and this model check before another question can be returned or search can begin.
+
 The standard questions are, in order:
 
 1. **Duration:** “How long has this been happening?”
 2. **Previous occurrence:** “Has this happened before?”
 3. **Pattern:** “Is it happening constantly, or does it come and go?”
 
-The first adaptive question is mandatory unless the model escalates. After the owner answers it,
-the adaptive chain may ask another useful question, declare the history ready for search, or
-escalate. A third adaptive question is the hard maximum. The code counts the questions: after the third
-answer the workflow goes straight to search without asking the model, so a fourth question cannot
-be requested. The phrase matcher still checks that answer first.
+The first adaptive question is mandatory. After the owner answers it, the adaptive chain may ask
+another useful question or declare the history ready for search. A third adaptive question is the
+hard maximum. The code counts the questions: after the third answer the workflow goes straight to
+search without asking the adaptive model, so a fourth question cannot be requested. The phrase gate
+still reads that answer and, if it does not match, the model check reads it before search starts.
 Search never runs before the owner has answered at least one adaptive question and never runs before
 the three standard questions.
 
-## 3. Three LangChain responsibilities
+## 3. Four LangChain responsibilities
+
+### Emergency-check chain
+
+Runs after the phrase gate on every turn the gate does not end. It receives the complete owner
+history before any question or search decision and answers one yes-or-no question: may the
+owner-reported signs need an emergency vet now?
+Its prompt names Cornell's four emergency categories (breathing difficulty, collapse, suspected
+poisoning, inability to urinate) and signs of poor oxygen such as blue or pale gums, and tells it
+to answer yes when unsure. It reasons over meaning, misspellings, pet names, and awkward wording
+rather than exact keywords. It never writes the notice. If it fails or returns malformed output,
+the turn is a `503`, never a silent pass.
 
 ### Adaptive-question chain
 
-Receives the complete owner history and decides one thing: escalate to the fixed emergency route,
-ask exactly one relevant question, or (after the mandatory first adaptive answer) declare the
-history ready for search. It is instructed to reason over meaning, misspellings, and awkward wording
-rather than exact keywords. It never writes the emergency notice, suggests causes, retrieves
+Receives the complete owner history and decides one thing: ask exactly one relevant question, or
+(after the mandatory first adaptive answer) declare the history ready for search. It cannot raise
+an emergency; the emergency-check chain alone does that. It never suggests causes, retrieves
 information, or writes the final result.
 
 ### Search-query chain
@@ -141,9 +159,9 @@ trade-off.
 The deterministic emergency matcher runs before every question, model call, search call, and
 synthesis call. It scans only the initial concern and owner answers, never assistant questions,
 search queries, retrieved pages, or generated output. A match ends the conversation before any
-model call. If it does not match, every adaptive decision can still escalate from context; the model
-chooses only the route and the application supplies the same fixed notice. Neither route can lower
-or override the other.
+model call. If it does not match, the emergency-check chain can still escalate from context on the
+same turn; the model chooses only the route and the application supplies the same fixed notice.
+Neither route can lower or override the other.
 
 Search is limited by [`approved-sources.md`](approved-sources.md) and the machine-readable catalog
 in `config/approved_sources.toml`. A `site:` clause improves relevance but is not a security
@@ -187,7 +205,8 @@ Svelte browser --/                         |       |        |
 - `frontend/public`: Svelte browser client served by the backend from its built `dist/` directory.
 - `backend/workflow.py`: state transitions, safety order, caps, citation validation, final result.
 - `backend/questions.py`: immutable standard-question catalog.
-- `backend/model.py`: three LangChain/Ollama chains and prompt loading.
+- `backend/model.py`: four LangChain/Ollama chains and prompt loading, including the standalone
+  emergency check used by every question-loop turn.
 - `backend/search.py`: query privacy validation, search, allowlist enforcement, extraction limits.
 - `backend/approved_sources.py`: source-catalog loading and host validation.
 - `backend/schemas.py`: request, chain-output, evidence, and result shapes.

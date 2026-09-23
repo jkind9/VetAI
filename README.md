@@ -9,17 +9,19 @@ Those three outcomes are the only severity judgement the demo makes:
 
 | Outcome | What the owner sees | Who decides it |
 | --- | --- | --- |
-| **Emergency** | A fixed notice to contact an emergency vet now | Either of two routes: curated warning phrases in the owner's own words, matched by plain Python before any model call, or the model judging the reported signs urgent at a later stage |
+| **Emergency** | A fixed notice to contact an emergency vet now | Two ordered checks are part of every turn: curated warning phrases matched by plain Python, then, if none match, a dedicated model check that judges whether the reported signs may need an emergency vet |
 | **Possible problem, see a vet** | A recap of what was reported, points to raise, and the sources used | The model, from the owner's answers and the retrieved evidence |
 | **Nothing flagged** | Nothing matched a warning sign and nothing was raised, plus what to watch for and when to go anyway | The model, within fixed wording the application supplies |
 
-Escalation runs one way. The phrase gate and the model can each raise an emergency on their own,
-and neither can lower one: a phrase match ends the turn before the model is asked, and a model that
-judges the reported signs urgent ends the conversation even though no phrase matched. The model
-decides *whether*, never the wording, so both routes return the same fixed notice. Letting the model
-escalate covers the phrase list's real weakness — four categories will miss urgent wording they do
-not contain — and it errs in the safer direction, since a false alarm sends someone to a vet they
-did not need.
+Escalation runs one way. On every turn, from the first message to the last answer before search,
+the owner's words enter an ordered two-check process. First the phrase gate: plain Python, instant,
+no model. Then, if no phrase matched, a model call with one job: decide whether the reported signs
+may need an emergency vet now. Either can raise an emergency and neither can lower one. The model decides
+*whether*, never the wording, so both routes return the same fixed notice. The model check covers
+the phrase list's weakness, which is urgent wording the list does not contain: a pet's name, a
+misspelling, a sign it does not name. It is told to answer yes when unsure, since a false alarm
+sends someone to a vet they did not need. If the check itself fails, the turn stops with the
+service error rather than continuing unchecked.
 
 "Nothing flagged" is a statement about what this demo checked, not a clinical all-clear. It cannot
 examine a pet, so it says what it found and what to keep an eye on, and never that a pet is well.
@@ -151,8 +153,9 @@ VETAI_RUN_OLLAMA_SMOKE=1 uv run pytest tests/test_ollama_smoke.py -v -s
 It prints the model's actual replies. Use `VETAI_OLLAMA_MODEL` to try a different tag.
 
 Plain Python routes listed emergency phrases, the three standard questions, and the adaptive
-question cap. The model can raise an emergency of its own, but it cannot clear one and it cannot
-start the search early. Search results are
+question cap. On every turn not ended by the phrase gate, a standalone model chain checks for an
+emergency before the workflow chooses the next question or starts search. It can raise an
+emergency, but it cannot clear one. Search results are
 filtered against [`config/approved_sources.toml`](config/approved_sources.toml), and the synthesis
 model may cite only source IDs that the workflow actually retrieved. This provides provenance; it
 does not clinically validate the generated text.
@@ -183,16 +186,26 @@ everything that is recorded.
 ## Conversation and chain order
 
 ```text
-concern -> phrase emergency check -> 3 standard questions
-        -> adaptive LLM decision(s): ask / ready / urgent escalation
-        -> final ready-or-escalate check at the 3-question cap
-        -> search-query chain -> approved-source search -> evidence-synthesis chain -> result
+1. QUESTION LOOP
+   owner concern or answer
+      -> phrase emergency gate -> standalone emergency-check chain
+      -> next fixed/adaptive question -> owner answers in a new turn -> repeat
+      -> ready after 1 to 3 adaptive answers
+
+2. SEARCH CHAIN
+   search-query chain -> approved-source search -> validated evidence
+
+3. SUMMARY + RECOMMENDATIONS
+   evidence-synthesis chain -> grounded owner-visible result
 ```
 
-The three standard questions always come first. Search never runs before at least one adaptive
-question has been answered. There is no automatic model retry or default medical response. The
-search adapter repeats an entirely failed generated plan once, without rephrasing or provider
-switching; any later failure leaves the owner's latest answer available for a manual retry. See
+The phrase gate can end a turn before the model is called. Otherwise the dedicated model check is
+a link inside the question loop: it runs before the first question and again after every answer,
+including the last answer before search. The three standard questions always come first. Search
+never runs before at least one adaptive question has been answered. There is no automatic model
+retry or default medical response. The search adapter repeats an entirely failed generated plan
+once, without rephrasing or provider switching; any later failure leaves the owner's latest answer
+available for a manual retry. See
 [`documentation/failure-handling.md`](documentation/failure-handling.md) for the complete action
 matrix and [`documentation/approved-sources.md`](documentation/approved-sources.md) for the source
 policy.

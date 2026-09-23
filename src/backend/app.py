@@ -68,7 +68,7 @@ def create_runtime_app(settings: BackendSettings | None = None) -> FastAPI:
         region=settings.search_region,
     )
     start_tracking()
-    # Recorded on every run: the model, and a SHA-256 of each of the three prompt files.
+    # Recorded on every run: the model, and a SHA-256 of each of the four prompt files.
     run_params = {"model": settings.model} | chains.prompt_hashes
     return create_app(chains, searcher, run_params)
 

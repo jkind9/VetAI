@@ -16,12 +16,12 @@ or invent a fallback.
   client uses its `auto` mode, which may try more than one engine inside that single search call.
 - No model-written default medical response.
 - No automatic rephrasing after a technical failure.
-- A model/search/synthesis failure returns one stable `503` message and preserves the current owner
-  answer for a user-initiated **Try again**.
+- A model/search/synthesis failure, including a failed emergency check, returns one stable `503`
+  message and preserves the current owner answer for a user-initiated **Try again**.
 - Invalid input or history returns `422` and asks for correction without calling downstream stages.
 - A deterministic emergency match returns the fixed `200 emergency_notice` and ends the chat.
-- An adaptive-model `urgent_escalation` returns that same fixed notice. The model chooses the route,
-  not owner-visible wording, and no later query/search/synthesis stage runs.
+- An emergency-check chain answer of `true` returns that same fixed notice. The model chooses the
+  route, not owner-visible wording, and no later question/query/search/synthesis stage runs.
 - Individual unusable search results may be discarded while other results from the same completed
   search are used. That is filtering, not a retry.
 - A failed query does not discard raw results returned by another query in the same plan.
@@ -43,8 +43,9 @@ the owner sees the stable service error; the application never displays the malf
 | Odd, out-of-order, over-12-message, or otherwise malformed history | History validation stops | `422`; correct/restart the chat | No | Stable history correction message |
 | First three assistant messages do not match the standard question catalog | History validation rejects a skipped/altered prefix | `422`; restart/correct history | No | No inferred replacement history |
 | Curated warning phrase in any owner answer | Emergency gate returns fixed result and skips every later stage | `200 emergency_notice`; contact an emergency veterinarian | No | Fixed application wording only |
-| Standard-question phase | Workflow returns the next catalog question | `200 question`; owner answers it | Not applicable | Deterministic catalog wording |
-| Adaptive model recognises urgent context that phrase matching missed, including misspelling | Workflow returns the fixed emergency result and skips every later stage | `200 emergency_notice`; contact an emergency veterinarian | No | Same fixed application wording; model text is never displayed |
+| Standard-question phase | After both emergency checks pass, workflow returns the next catalog question | `200 question`; owner answers it | Not applicable | Deterministic catalog wording |
+| Emergency-check chain recognises urgent context that phrase matching missed, including misspellings and pet names, on any turn | Workflow returns the fixed emergency result and skips every later stage | `200 emergency_notice`; contact an emergency veterinarian | No | Same fixed application wording; model text is never displayed |
+| Emergency-check chain times out, cannot reach Ollama, or returns malformed output | Stage `emergency_check` raises `ModelOutputError`; the turn is never treated as "no emergency" | `503`; retain draft and offer **Try again** | No | No question, assessment, or search without a completed check |
 | First adaptive chain returns `ready_for_search` instead of a question | Required-question contract is violated | `503`; retain draft and offer **Try again** | No | No silently substituted question |
 | Adaptive chain returns malformed/blank/overlong output | Structured output rejected | `503`; retain draft and offer **Try again** | No | Invalid text is never displayed |
 | Adaptive model times out | Model adapter raises `timeout` | `503`; retain draft and offer **Try again** | No | No default question |
@@ -117,8 +118,10 @@ Exact launch defaults live in backend settings and are documented in `config/REA
 - `tests/test_api.py` covers validation/history correction and successful public response shapes.
 - `tests/test_error_contracts.py` exercises malformed model output, timeout, search failure, empty
   evidence, malformed/ungrounded synthesis, and unexpected `500` handling at the HTTP boundary.
-- `tests/test_workflow.py` proves phrase and model escalation short-circuit later stages, including
-  the typo case and the final cap decision.
+- `tests/test_workflow.py` proves the phrase gate and, on every unmatched turn, the model emergency
+  check short-circuit later stages from the first request to the last answer before search. It also
+  proves that a failed check stops the turn. The opt-in `tests/test_emergency_check_live.py`
+  measures the real check.
 - `tests/test_search.py` covers deterministic allowlist/filtering failures, retained sibling
   results, the bounded total-failure repeat, and named no-result/no-evidence outcomes; the opt-in
   `tests/test_approved_source_smoke.py` covers a real approved page.

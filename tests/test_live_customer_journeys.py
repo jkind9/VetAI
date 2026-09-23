@@ -70,6 +70,11 @@ class RecordingChains:
     delegate: OllamaChatModel
     events: list[dict[str, Any]] = field(default_factory=list)
 
+    def check_for_emergency(self, turn):
+        return self._record(
+            "emergency_check", lambda: self.delegate.check_for_emergency(turn)
+        )
+
     def propose_adaptive_question(self, turn, mode):
         return self._record(
             "adaptive", lambda: self.delegate.propose_adaptive_question(turn, mode), mode=mode
@@ -315,21 +320,18 @@ def test_j2_real_model_escalates_misspelled_urgent_context(
     journey: LiveJourney, run_number: int
 ) -> None:
     try:
-        _, response = _complete_standard_questions(
-            journey,
-            "I think my dog is dieing and getting worse.",
-            ("About ten minutes.", "No, never before.", "It is constant and getting worse."),
-        )
+        response = journey.post("I think my dog is dieing and getting worse.", [])
 
         assert response["kind"] == "emergency_notice", response
         assert response["reply"] == EMERGENCY_NOTICE
-        assert [event["stage"] for event in journey.chains.events] == ["adaptive"]
-        assert journey.chains.events[0]["output"]["kind"] == "urgent_escalation"
+        assert [event["stage"] for event in journey.chains.events] == ["emergency_check"]
+        assert journey.chains.events[0]["output"] == {"emergency": True}
         assert journey.searcher.events == []
         journey.route_evidence = {
-            "expected_route": "model_urgent_escalation",
+            "expected_route": "model_emergency_check",
             "basis": (
-                "Recorded real adaptive-model output was urgent_escalation; no search stage ran."
+                "Recorded real emergency-check output was true on turn 1; no question or search "
+                "stage ran."
             ),
         }
         journey.automated_status = "passed_automated_checks"
@@ -378,7 +380,14 @@ def test_j3_real_model_search_and_grounded_assessment(
         _assert_assessment_grounding(response, journey.searcher.events)
         stages = [event["stage"] for event in journey.chains.events]
         assert stages[-2:] == ["query", "synthesis"]
-        adaptive_events = journey.chains.events[:-2]
+        emergency_events = [
+            event for event in journey.chains.events if event["stage"] == "emergency_check"
+        ]
+        adaptive_events = [
+            event for event in journey.chains.events if event["stage"] == "adaptive"
+        ]
+        assert len(emergency_events) == 4 + len(adaptive_questions)
+        assert all(event["output"] == {"emergency": False} for event in emergency_events)
         assert adaptive_events[0]["mode"] == "question_required"
         if len(adaptive_questions) == 3:
             # At the limit the code goes straight to search without asking the model.

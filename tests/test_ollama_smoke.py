@@ -37,17 +37,15 @@ def test_adaptive_chain_returns_a_required_question(chains) -> None:
     assert result.question
 
 
-def test_adaptive_chain_can_escalate_urgent_misspelled_context(chains) -> None:
-    result = chains.propose_adaptive_question(
+def test_emergency_chain_escalates_urgent_misspelled_context(chains) -> None:
+    result = chains.check_for_emergency(
         TurnRequest(
             intake=intake("My dog looks like she is dieing and is barely responsive."),
-            history=standard_history(),
-        ),
-        "question_required",
+            history=[],
+        )
     )
 
-    assert result.kind == "urgent_escalation"
-    assert result.question is None
+    assert result.emergency is True
 
 
 def test_query_and_synthesis_chains_return_structured_outputs(chains) -> None:

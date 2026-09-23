@@ -1,9 +1,11 @@
 # Design documents
 
-- [Implementation plan](implementation-plan.md): ordered multi-chain flow, architecture, privacy boundaries, and deferred milestones.
+- [Implementation plan](implementation-plan.md): ordered multi-chain flow, the per-turn emergency
+  check inside the question loop, architecture, privacy boundaries, and deferred milestones.
 - [Failure handling](failure-handling.md): complete error-to-action, retry, fallback, and desktop-state contract.
 - [Approved sources](approved-sources.md): reviewed organisations, domains, enforcement, and evidence rules.
-- [Test cases](test-cases.md): synthetic cases for standard questions, adaptive questions, retrieval, synthesis, safeguards, and failures.
+- [Test cases](test-cases.md): synthetic cases for standard questions, the standalone model
+  emergency check, adaptive questions, retrieval, synthesis, safeguards, and failures.
 - [Technical-test brief](../e071501d-5c3c-4368-9565-a0ba2b94ce0c_Tech_Test.pdf): original assignment.
 
 The current milestone adds bounded live retrieval but not a vector database or stored RAG corpus.

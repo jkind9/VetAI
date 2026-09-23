@@ -8,9 +8,11 @@ import mlflow
 from fastapi.testclient import TestClient
 
 from backend.app import create_runtime_app
+from backend.schemas import EmergencyCheck
 from backend.settings import BackendSettings
 
 STUB_PROMPT_HASHES = {
+    "emergency_check": "e0",
     "adaptive_question": "a1",
     "search_query": "b2",
     "evidence_synthesis": "c3",
@@ -26,6 +28,9 @@ def test_runtime_app_builds_chains_and_searcher_from_settings(monkeypatch) -> No
         def __init__(self, model: str, **kwargs: Any) -> None:
             constructed["model"] = model
             constructed["chain_kwargs"] = kwargs
+
+        def check_for_emergency(self, turn) -> EmergencyCheck:
+            return EmergencyCheck(emergency=False)
 
     class StubSearcher:
         @classmethod
@@ -59,6 +64,9 @@ def test_runtime_app_records_the_model_and_prompt_versions_on_each_run(monkeypat
 
         def __init__(self, model: str, **kwargs: Any) -> None:
             pass
+
+        def check_for_emergency(self, turn) -> EmergencyCheck:
+            return EmergencyCheck(emergency=False)
 
     class StubSearcher:
         @classmethod

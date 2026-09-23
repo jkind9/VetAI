@@ -11,7 +11,7 @@ Each chat turn (one `POST /v1/chat`) is one MLflow **run** in the `vetai-chat` e
 | Kind | Name | Meaning |
 | --- | --- | --- |
 | parameter | `model` | the Ollama model tag, for example `llama3:latest` |
-| parameter | `adaptive_question`, `search_query`, `evidence_synthesis` | a SHA-256 of each prompt file, so runs made with different prompt text can be told apart |
+| parameter | `emergency_check`, `adaptive_question`, `search_query`, `evidence_synthesis` | a SHA-256 of each prompt file, so runs made with different prompt text can be told apart |
 | parameter | `species` | dog or cat |
 | parameter | `answered_questions` | how many questions the owner had answered before this turn (0 to 6) |
 | metric | `turn_seconds` | how long the turn took |
@@ -22,11 +22,18 @@ Each run holds one **trace**:
 
 - Its top span, `chat_turn`, holds the request and the result.
 - Inside it, every LangChain call the turn made has its own span with the exact prompt sent, the
-  model's reply, and how long it took. Those calls are the adaptive-question, search-query and
-  evidence-synthesis chains.
+  model's reply, and how long it took. The emergency check is a standalone span before the
+  question-loop decision. A fixed-question turn therefore contains the emergency-check span; an
+  adaptive turn contains emergency-check then adaptive-question spans; and the turn that starts
+  search contains emergency-check before any search-query and evidence-synthesis spans.
+- A phrase-gate match has no model span because it ends the turn before the emergency chain. A
+  failed emergency check is recorded as stage `emergency_check` and the turn is marked FAILED.
 - The web search and page fetching between those calls has no span yet.
 
-The `run_id` in each successful chat response is that turn's run, for looking it up in the UI.
+The `run_id` in each successful chat response is that turn's run, for looking it up in the UI. The
+opt-in dedicated emergency-check evaluation records one aggregate MLflow run with
+`emergencies_caught`, `false_alarms`, and `cases` metrics so the 7/7 and zero-false-alarm target is
+inspectable rather than reported only in test output.
 
 ## See it
 
@@ -73,8 +80,8 @@ Behaviours to know about:
 - With MLflow's default background saving, some traces were written as files under `./mlruns`
   instead of into `mlflow.db`. That splits the data in two, and `/app` is not writable in the
   Docker image. Saving each trace before the turn returns keeps everything in the one database
-  file. In the real-model check, turns with no model call still took under 0.1 seconds including
-  the save.
+  file. In the earlier real-model check, phrase-matched turns with no model call still took under
+  0.1 seconds including the save.
 - Recording never changes the reply. This follows the usual rule for tracking and telemetry:
   lose the record rather than change what the app does.
   - If MLflow cannot open a run, for example because the database file is read-only, the turn is

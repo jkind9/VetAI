@@ -83,10 +83,7 @@ test('deterministic emergency concern ends immediately with the fixed notice', a
 test('misspelled urgent concern escalates through the model decision path', async ({ page }) => {
   await page.goto('/');
   await sendConcern(page, 'I am worried my dog is dieing.');
-  await expect(page.getByText(STANDARD_QUESTIONS[0], { exact: true })).toBeVisible();
-  await answer(page, 'It started this morning.', STANDARD_QUESTIONS[1]);
-  await answer(page, 'No, never before.', STANDARD_QUESTIONS[2]);
-  await answer(page, 'It is constant.', EMERGENCY_NOTICE);
+  await expect(page.getByText(EMERGENCY_NOTICE, { exact: true })).toBeVisible();
 
   await expect(page.getByPlaceholder('Your answer')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'New concern' })).toBeVisible();

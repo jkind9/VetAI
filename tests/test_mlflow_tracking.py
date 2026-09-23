@@ -19,17 +19,30 @@ from mlflow.exceptions import MlflowException
 
 from backend.app import create_app
 from backend.error_handling import SERVICE_ERROR_TEXT
-from backend.schemas import AdaptiveDecision, ModelOutputError, QuestionMode, TurnRequest
+from backend.schemas import (
+    AdaptiveDecision,
+    EmergencyCheck,
+    ModelOutputError,
+    QuestionMode,
+    TurnRequest,
+)
 from conftest import FakeChains, FakeSearcher, standard_history
 from mlflow_tracking.chat_runs import EXPERIMENT_NAME, start_tracking
 
 QUESTION_CHAIN = ChatPromptTemplate.from_messages(
     [("human", "Ask one question about: {concern}")]
 ) | FakeListChatModel(responses=["What else have you noticed?"])
+EMERGENCY_CHAIN = ChatPromptTemplate.from_messages(
+    [("human", "Check for an emergency in: {concern}")]
+) | FakeListChatModel(responses=["No emergency"])
 
 
 class QuestionFromLangChain:
-    """Stand-in chains whose adaptive step makes one real LangChain call, for autolog to trace."""
+    """Stand-in whose emergency and adaptive steps make real traceable LangChain calls."""
+
+    def check_for_emergency(self, turn: TurnRequest) -> EmergencyCheck:
+        EMERGENCY_CHAIN.invoke({"concern": turn.intake.concern})
+        return EmergencyCheck(emergency=False)
 
     def propose_adaptive_question(
         self, turn: TurnRequest, mode: QuestionMode
@@ -41,7 +54,7 @@ class QuestionFromLangChain:
 def _request(
     concern: str = "My dog keeps scratching", *, after_standard_questions: bool = False
 ) -> dict[str, Any]:
-    """A turn request. After the three standard questions, the next turn calls the model."""
+    """A turn request; every unmatched turn calls the emergency model first."""
     history = standard_history() if after_standard_questions else []
     return {
         "intake": {"species": "dog", "concern": concern},
@@ -129,11 +142,16 @@ def test_turn_trace_holds_prompt_reply_and_time() -> None:
     traces = _traces_of(run_id)
     assert len(traces) == 1
     root = _root_span(traces[0])
-    chat_model = next(span for span in traces[0].data.spans if span.span_type == "CHAT_MODEL")
+    chat_models = [span for span in traces[0].data.spans if span.span_type == "CHAT_MODEL"]
     assert root.name == "chat_turn"
     assert root.inputs["intake"]["concern"] == "My dog keeps scratching"
-    assert "Ask one question about: My dog keeps scratching" in str(chat_model.inputs)
-    assert "What else have you noticed?" in str(chat_model.outputs)
+    assert len(chat_models) == 2
+    model_inputs = " ".join(str(span.inputs) for span in chat_models)
+    model_outputs = " ".join(str(span.outputs) for span in chat_models)
+    assert "Check for an emergency in: My dog keeps scratching" in model_inputs
+    assert "Ask one question about: My dog keeps scratching" in model_inputs
+    assert "No emergency" in model_outputs
+    assert "What else have you noticed?" in model_outputs
     assert traces[0].info.execution_duration is not None
 
 

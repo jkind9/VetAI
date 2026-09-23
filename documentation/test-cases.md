@@ -13,8 +13,10 @@ and, where applicable, live approved-source search.
 - The first three assistant messages exactly match the standard question catalog.
 - At least one and at most three adaptive questions are answered before search.
 - Emergency matching is repeated on every request using owner-authored concern and answers only.
-- Every adaptive model decision may escalate; at the question cap the model may only escalate or
-  declare the history ready.
+- On every request not ended by the phrase gate, the model emergency check runs before any
+  question, adaptive call, or search. It is the only model stage that can escalate.
+- The adaptive chain can only ask a question or declare the history ready; the code stops it after
+  three questions.
 - Search receives generated queries only, never the raw transcript.
 - An assessment or emergency notice ends the conversation.
 
@@ -22,9 +24,9 @@ and, where applicable, live approved-source search.
 
 | ID | Input | Expected behaviour |
 | --- | --- | --- |
-| S1 | Dog; concern “My dog scratched one ear today”; empty history | Return `question`, `question_type=standard`, ID `duration`, exact first catalog wording; zero model and search calls |
-| S2 | S1 plus answer “Since this morning” | Return standard ID `previous_occurrence`; zero model and search calls |
-| S3 | Two completed standard pairs | Return standard ID `pattern`; zero model and search calls |
+| S1 | Dog; concern “My dog scratched one ear today”; empty history; emergency check returns false | Call the emergency check once, then return `question`, `question_type=standard`, ID `duration`, exact first catalog wording; zero adaptive/query/search/synthesis calls |
+| S2 | S1 plus answer “Since this morning”; emergency check returns false | Call the emergency check once on the complete history, then return standard ID `previous_occurrence`; zero other chain or search calls |
+| S3 | Two completed standard pairs; emergency check returns false | Call the emergency check once on the complete history, then return standard ID `pattern`; zero other chain or search calls |
 | S4 | First assistant text differs from the duration catalog wording | `422 history`; zero model and search calls |
 | S5 | Standard answer is blank, over 1000 characters, incomplete, or roles are reversed | `422`; zero model and search calls |
 
@@ -36,10 +38,10 @@ and, where applicable, live approved-source search.
 | A2 | One adaptive pair complete; fake adaptive chain returns `ready_for_search` | Call query chain, then search, then synthesis; return structured assessment |
 | A3 | One adaptive pair complete; fake asks a second question | Return question; no search |
 | A4 | Two adaptive pairs complete; fake asks a third question | Return question; no search |
-| A5 | Three adaptive pairs complete | No adaptive call; query → search → synthesis. A phrase-matcher emergency in the third answer still stops the chat first |
+| A5 | Three adaptive pairs complete | Run the emergency check first. If it returns false, make no adaptive call and continue query → search → synthesis. Either emergency check can still stop the chat before search |
 | A6 | First adaptive call returns `ready_for_search` | `503`; no search; no substitute question; owner can manually retry |
 | A7 | Adaptive output is malformed, blank, or overlong | `503`; no automatic retry; raw output is hidden |
-| A8 | Any adaptive call returns `urgent_escalation` | Return the fixed `emergency_notice`; no query, search, or synthesis call |
+| A8 | Adaptive output attempts the removed `urgent_escalation` kind | Reject it as invalid structured output and return `503`; no query, search, or synthesis call. Model escalation belongs only to the emergency-check chain |
 
 ## R — query generation and approved-source retrieval
 
@@ -82,8 +84,11 @@ and, where applicable, live approved-source search.
 | E5 | Any standard or adaptive owner answer newly reports a curated warning phrase | Fixed notice on that request; no later chain/search call |
 | E6 | Assistant question contains warning wording but owner says “No” | Do not scan assistant text; continue ordinary phase |
 | E7 | Negated and near-miss cases from safeguard tests | Preserve existing matcher policy; do not imply general safety |
-| E8 | Initial concern says “My dog is dieing”; phrase matcher does not match; adaptive fake returns `urgent_escalation` | Same fixed notice; no query/search/synthesis; internal rule identifies model escalation. The opt-in Ollama smoke suite repeats the decision against the configured real model |
-| E9 | Third adaptive answer uses urgent contextual or misspelled wording; final safety call escalates | Same fixed notice; never start search |
+| E8 | Initial concern says “My dog is dieing”; phrase matcher does not match; emergency-check fake returns `emergency=true` on the first request | Same fixed notice before any standard question; no adaptive/query/search/synthesis call; internal rule `model_emergency_check`. The opt-in live eval repeats the decision against the real model |
+| E9 | Third adaptive answer uses urgent contextual or misspelled wording; emergency check returns true | Same fixed notice; never start search |
+| E10 | No phrase match; emergency check returns false on turns 1, 2 and 3 | Each turn calls the check exactly once, then returns the next fixed question |
+| E11 | A phrase match on any turn | The model check is not called |
+| E12 | Opt-in live eval: seven clear emergencies the phrase list misses (for example “She can’t breathe” with a curly apostrophe, “Max collapsed on the kitchen floor”, “Her tongue has gone blue”) and ordinary sentences (“maybe a week”, “her heart rate went up after her new medication”, “she isn’t having any trouble breathing”) sent straight to the real check | 7 of 7 emergencies true, 0 ordinary sentences true; one MLflow run records `emergencies_caught`, `false_alarms` and `cases`. Baseline 2026-09-23 with the old adaptive-chain escalation: 2 of 7 |
 
 ## F — failures and public API
 
@@ -96,7 +101,7 @@ and, where applicable, live approved-source search.
 | F5 | Search failure/no evidence | Same `503`; no synthesis |
 | F6 | Unexpected application exception | `500` with same safe service text; diagnostics stay in logs |
 | F7 | Tracking | A successful response carries the `run_id` of the turn's MLflow run; error bodies keep `run_id: null`; every failed turn's run is marked FAILED with a `failure_reason` tag (plus `failed_stage` for model, search and grounding failures); if MLflow cannot open a run, the reply still goes out untraced with `run_id: null`; a failed MLflow write never changes the reply or its status; a deleted experiment is restored at startup |
-| F8 | Three adaptive answers exist | No model call is made, so no malformed or fourth-question reply can occur; the turn goes to search |
+| F8 | Three adaptive answers exist | The emergency check still runs, but no adaptive call is made, so no malformed or fourth-question reply can occur; a false check continues to search |
 
 ## D — desktop behaviour
 
@@ -119,7 +124,7 @@ and, where applicable, live approved-source search.
 | W3 | Owner answers all fixed questions and all three adaptive questions; the workflow goes straight to search; outcome is `possible_problem` | Production browser bundle sends every turn to hosted FastAPI and renders fixed wording, reported facts, possible areas, suggested actions, veterinarian questions, resolved sources, disclaimer, and **New concern** |
 | W4 | Owner answers all fixed and adaptive questions; outcome is `nothing_flagged` | Production browser bundle renders the bounded non-clearance wording, suggested actions, sources, disclaimer, and **New concern**, with no possible-areas section |
 | W5 | Initial concern matches a deterministic emergency rule | Hosted backend returns the fixed notice immediately; browser removes the answer composer and shows **New concern** |
-| W6 | Concern contains misspelled urgent context (`dieing`) that does not match a phrase rule; deterministic model adapter escalates after the fixed questions | Browser renders the complete fixed emergency notice, removes the answer composer, and shows **New concern** |
+| W6 | Concern contains misspelled urgent context (`dieing`) that does not match a phrase rule; deterministic emergency-check adapter escalates on the first request | Browser renders the complete fixed emergency notice, removes the answer composer, and shows **New concern** |
 | W7 | Adaptive model call fails after the owner submits the third fixed answer | Browser shows the stable service error and **Try again**, and preserves the exact draft answer |
 
 W3–W7 run in Playwright against a real FastAPI server and the production Svelte build. The model
@@ -171,22 +176,19 @@ run, rather than keeping only the best output.
 | Required path evidence | The journey ends after one request. The public response deliberately does not disclose `emergency_rule`; the artifact records the harness-derived expected route `breathing_difficulty` from the exact notice and absence of model/search stages. Confirm from the turn's MLflow trace: its root span's output names the rule (`emergency_rule`), and it has no model or search spans |
 | Failure conditions | Any question is asked; wording differs from the fixed notice; a downstream model/search stage runs; or the response is not terminal |
 
-### J2 — urgent escalation decided by the real model
+### J2 — dedicated emergency check escalates with the real model
 
 This fixture deliberately uses the misspelling `dieing`, which the phrase rules do not match. The
-artifact must record the harness-derived expected route `model_urgent_escalation`, proving that a
+artifact must record the harness-derived expected route `model_emergency_check`, proving that a
 real Ollama decision—not keyword matching—selected the route. The public response deliberately
 omits internal route names.
 
 | Turn | Customer input / expected result |
 | --- | --- |
 | Intake | `species=dog`; concern: “I think my dog is dieing and getting worse.” |
-| Standard answer 1 | To “How long has this been happening?” answer “About ten minutes.” |
-| Standard answer 2 | To “Has this happened before?” answer “No, never before.” |
-| Standard answer 3 | To “Is it happening constantly, or does it come and go?” answer “It is constant and getting worse.” |
-| Expected response | The next real adaptive-model decision returns `200`, `kind=emergency_notice`, and the same complete fixed notice as J1 |
-| Required path evidence | The phrase gate did not match; the real configured model was called; no query, search, retrieval, or synthesis stage ran after escalation |
-| Failure conditions | Keyword matching claims the escalation; the model asks a routine follow-up or starts search instead of escalating; model-authored emergency wording is exposed; or the final response is not terminal |
+| Expected response | The first request returns `200`, `kind=emergency_notice`, and the same complete fixed notice as J1, before any standard question |
+| Required path evidence | The phrase gate did not match; the real emergency-check chain was called once; no adaptive, query, search, retrieval, or synthesis stage ran |
+| Failure conditions | Keyword matching claims the escalation; a standard question is asked; model-authored emergency wording is exposed; or the response is not terminal |
 
 ### J3 — real questions, live web search, and generated assessment
 
