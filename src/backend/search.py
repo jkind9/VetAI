@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
+from time import sleep
 from typing import Any, Protocol
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
@@ -18,6 +19,8 @@ MAX_EVIDENCE_ITEMS = 4
 MAX_PAGE_BYTES = 500_000
 MAX_EXCERPT_CHARS = 4000
 MAX_REDIRECTS = 3
+MAX_SEARCH_ATTEMPTS = 2
+SEARCH_RETRY_DELAY_SECONDS = 0.25
 
 _URL = re.compile(r"(?:https?://|www\.)", re.IGNORECASE)
 _EMAIL = re.compile(r"\b[^\s@]+@[^\s@]+\.[^\s@]+\b")
@@ -159,22 +162,12 @@ class ApprovedSourceSearcher:
                     "unsafe_search_query", stage="approved_source_search"
                 )
 
-        raw_results: list[dict[str, Any]] = []
         domain_filter = " OR ".join(f"site:{domain}" for domain in sorted(self._catalog.domains))
-        try:
-            for query in plan.queries:
-                raw_results.extend(
-                    self._search_client.text(
-                        f"({domain_filter}) {query}",
-                        region=self._region,
-                        safesearch="moderate",
-                        max_results=MAX_RAW_RESULTS,
-                    )
-                )
-        except Exception as error:  # provider exceptions are intentionally hidden
+        raw_results = self._search_provider(plan.queries, domain_filter)
+        if not raw_results:
             raise ModelOutputError(
-                "search_failed", type(error).__name__, stage="approved_source_search"
-            ) from error
+                "no_search_results", stage="approved_source_search"
+            )
 
         evidence: list[EvidenceItem] = []
         seen: set[str] = set()
@@ -219,3 +212,34 @@ class ApprovedSourceSearcher:
                 "insufficient_evidence", stage="approved_source_search"
             )
         return evidence
+
+    def _search_provider(
+        self, queries: list[str], domain_filter: str
+    ) -> list[dict[str, Any]]:
+        """Run each planned query once, repeating the plan only after total provider failure."""
+        for attempt in range(MAX_SEARCH_ATTEMPTS):
+            raw_results: list[dict[str, Any]] = []
+            failed_calls = 0
+            for query in queries:
+                try:
+                    raw_results.extend(
+                        self._search_client.text(
+                            f"({domain_filter}) {query}",
+                            region=self._region,
+                            safesearch="moderate",
+                            max_results=MAX_RAW_RESULTS,
+                        )
+                    )
+                except Exception:
+                    failed_calls += 1
+
+            if raw_results or failed_calls < len(queries):
+                return raw_results
+            if attempt + 1 < MAX_SEARCH_ATTEMPTS:
+                sleep(SEARCH_RETRY_DELAY_SECONDS)
+
+        raise ModelOutputError(
+            "search_failed",
+            "all planned provider calls failed twice",
+            stage="approved_source_search",
+        )

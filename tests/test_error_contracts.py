@@ -93,6 +93,20 @@ def test_no_evidence_is_a_stable_503_without_synthesis_or_retry() -> None:
     assert chains.synthesis_calls == []
 
 
+def test_no_search_results_is_a_stable_503_without_synthesis() -> None:
+    chains = FakeChains(adaptive=[AdaptiveDecision(kind="ready_for_search")])
+    searcher = FakeSearcher(
+        error=ModelOutputError("no_search_results", stage="approved_source_search")
+    )
+
+    response = _client(chains, searcher).post("/v1/chat", json=_ready_request())
+
+    _assert_service_error(response)
+    assert len(chains.plan_calls) == 1
+    assert len(searcher.calls) == 1
+    assert chains.synthesis_calls == []
+
+
 def test_malformed_synthesis_output_is_a_stable_503() -> None:
     chains = FakeChains(
         adaptive=[AdaptiveDecision(kind="ready_for_search")],

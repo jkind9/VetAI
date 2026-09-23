@@ -240,6 +240,21 @@ def test_empty_provider_results_have_a_distinct_named_outcome() -> None:
     assert raised.value.stage == "approved_source_search"
 
 
+def test_empty_result_does_not_retry_after_a_sibling_provider_failure() -> None:
+    client = SequencedSearchClient([[], TimeoutError("provider timed out")])
+    searcher = ApprovedSourceSearcher(
+        ApprovedSourceCatalog.load(DEFAULT_SOURCE_CATALOG_PATH),
+        search_client=client,
+        page_fetcher=FakePageFetcher({}),
+    )
+
+    with pytest.raises(ModelOutputError) as raised:
+        searcher.search(SearchPlan(queries=["dog concern one", "dog concern two"]))
+
+    assert raised.value.reason == "no_search_results"
+    assert len(client.queries) == 2
+
+
 def test_no_usable_approved_result_is_a_named_failure() -> None:
     client = FakeSearchClient(
         [{"title": "Off list", "href": "https://example.com", "body": "No"}]

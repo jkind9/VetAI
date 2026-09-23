@@ -34,6 +34,7 @@ FailureReason = Literal[
     "connection",
     "unsafe_search_query",
     "search_failed",
+    "no_search_results",
     "insufficient_evidence",
     "ungrounded_synthesis",
 ]
