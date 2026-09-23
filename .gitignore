@@ -28,3 +28,4 @@ Thumbs.db
 # Scratch space used while building; not part of the deliverable
 tmp/
 task_list/
+graphify-out/
