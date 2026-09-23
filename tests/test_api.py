@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import mlflow
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -35,15 +36,17 @@ def _client(chains: Any | None = None, searcher: Any | None = None) -> TestClien
 def test_first_request_returns_the_first_standard_question() -> None:
     response = _client().post("/v1/chat", json=_request())
 
+    payload = response.json()
+    run_id = payload.pop("run_id")
     assert response.status_code == 200
-    assert response.json() == {
+    assert payload == {
         "kind": "question",
         "reply": "How long has this been happening?",
         "question_type": "standard",
         "question_id": "duration",
         "assessment": None,
-        "run_id": None,
     }
+    assert mlflow.get_run(run_id).info.status == "FINISHED"
 
 
 def test_completed_questioning_returns_structured_assessment() -> None:
@@ -64,7 +67,7 @@ def test_completed_questioning_returns_structured_assessment() -> None:
     assert payload["assessment"]["possible_areas"][0]["source_ids"] == ["S1"]
     assert payload["assessment"]["suggested_actions"][0]["source_ids"] == ["S1"]
     assert payload["assessment"]["sources"][0]["url"] == "https://vet.cornell.edu/example"
-    assert payload["run_id"] is None
+    assert mlflow.get_run(payload["run_id"]).info.status == "FINISHED"
 
 
 def test_invalid_intake_is_a_field_correction_without_downstream_calls() -> None:

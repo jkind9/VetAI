@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
+from pathlib import Path
+
+# Keep this server's MLflow runs out of the project's mlflow.db. This has to happen before
+# importing backend.app, which starts tracking on import.
+os.environ["MLFLOW_TRACKING_URI"] = "sqlite:///" + Path(tempfile.mkdtemp(), "mlflow.db").as_posix()
+
 from backend.app import create_app
 from backend.schemas import (
     AdaptiveDecision,

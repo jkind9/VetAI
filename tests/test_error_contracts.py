@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-import backend.app as app_module
+import mlflow_tracking.chat_runs as chat_runs
 from backend.app import create_app
 from backend.error_handling import SERVICE_ERROR_TEXT
 from backend.schemas import AdaptiveDecision, ModelOutputError
@@ -137,7 +137,7 @@ def test_unexpected_application_exception_is_a_safe_500(monkeypatch: Any) -> Non
     def fail_unexpectedly(turn: Any, chains: Any, searcher: Any) -> Any:
         raise RuntimeError("raw provider diagnostics must stay server-side")
 
-    monkeypatch.setattr(app_module, "run_turn", fail_unexpectedly)
+    monkeypatch.setattr(chat_runs, "run_turn", fail_unexpectedly)
 
     response = _client(FakeChains(), FakeSearcher()).post(
         "/v1/chat", json=_request()

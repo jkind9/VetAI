@@ -15,11 +15,15 @@ RUN useradd --create-home --uid 10001 vetai
 
 COPY --from=builder /app/.venv /app/.venv
 COPY --chown=vetai:vetai src/backend ./src/backend
+COPY --chown=vetai:vetai src/mlflow_tracking ./src/mlflow_tracking
 COPY --chown=vetai:vetai prompts ./prompts
 COPY --chown=vetai:vetai config ./config
 
+# The vetai user cannot write to /app, so MLflow keeps its database in the user's home folder.
+# It is lost when the container is removed.
 ENV PATH="/app/.venv/bin:${PATH}" \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    MLFLOW_TRACKING_URI=sqlite:////home/vetai/mlflow.db
 
 USER vetai
 EXPOSE 8000

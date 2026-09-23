@@ -13,11 +13,17 @@ from backend.model import OllamaChatModel
 from backend.schemas import TurnRequest
 from backend.search import ApprovedSourceSearcher
 from backend.settings import BackendSettings
-from backend.workflow import run_turn
+from mlflow_tracking.chat_runs import run_tracked_turn, start_tracking
 
 
-def create_app(chains: Any, searcher: Any) -> FastAPI:
-    """Build an API with injected chain and search boundaries for deterministic tests."""
+def create_app(
+    chains: Any, searcher: Any, run_params: dict[str, str] | None = None
+) -> FastAPI:
+    """Build an API with injected chain and search boundaries for deterministic tests.
+
+    Every turn is recorded as an MLflow run, with `run_params` (for example the model name) added
+    to each run's parameters.
+    """
     app = FastAPI()
     register_error_handlers(app)
 
@@ -27,9 +33,9 @@ def create_app(chains: Any, searcher: Any) -> FastAPI:
 
     @app.post("/v1/chat")
     def chat(turn: TurnRequest) -> dict[str, Any]:
-        result = run_turn(turn, chains, searcher)
+        result, run_id = run_tracked_turn(turn, chains, searcher, run_params or {})
         payload = result.model_dump(mode="json", exclude={"emergency_rule"})
-        payload["run_id"] = None
+        payload["run_id"] = run_id
         return payload
 
     _serve_browser_client(app)
@@ -61,7 +67,10 @@ def create_runtime_app(settings: BackendSettings | None = None) -> FastAPI:
         timeout=settings.search_timeout_seconds,
         region=settings.search_region,
     )
-    return create_app(chains, searcher)
+    start_tracking()
+    # Recorded on every run: the model, and a SHA-256 of each of the three prompt files.
+    run_params = {"model": settings.model} | chains.prompt_hashes
+    return create_app(chains, searcher, run_params)
 
 
 app = create_runtime_app()

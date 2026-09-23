@@ -1,4 +1,5 @@
 # Local MLflow runs hold owner-entered text. Never commit them.
+mlflow.db
 mlruns/
 mlartifacts/
 

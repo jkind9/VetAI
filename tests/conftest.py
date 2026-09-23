@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import os
+import tempfile
+from pathlib import Path
 from typing import Any
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Every MLflow run the tests make goes to a throwaway database, never the project's mlflow.db.
+# This has to happen here, before any test imports backend.app, which starts tracking on import.
+os.environ["MLFLOW_TRACKING_URI"] = "sqlite:///" + Path(tempfile.mkdtemp(), "mlflow.db").as_posix()
 
 import pytest
 from PySide6.QtWidgets import QApplication

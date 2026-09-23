@@ -11,6 +11,7 @@ dependencies = [
     "langchain-core>=0.3",
     "langchain-ollama>=0.2",
     "uvicorn[standard]>=0.30",
+    "mlflow>=3.16.1",
 ]
 
 [build-system]
@@ -18,7 +19,9 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 # The FastAPI backend is the base install. The native desktop client is optional so a backend
-# container does not carry GUI libraries. MLflow remains deferred until its tracking milestone.
+# container does not carry GUI libraries. The full `mlflow` package is in the base install so
+# `uv run mlflow ui` works with no extra steps; it brings scikit-learn, scipy, pandas, pyarrow and
+# matplotlib with it, which makes the install and the Docker image noticeably larger.
 
 [project.optional-dependencies]
 desktop = [
@@ -37,7 +40,7 @@ dev = [
 package = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/backend", "src/frontend"]
+packages = ["src/backend", "src/frontend", "src/mlflow_tracking"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
