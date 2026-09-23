@@ -79,10 +79,16 @@ class TurnRequest(BaseModel):
     history: list[Message] = Field(default_factory=list, max_length=MAX_HISTORY_MESSAGES)
 
 
+class EmergencyCheck(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    emergency: bool = Field(strict=True)
+
+
 class AdaptiveDecision(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, frozen=True)
 
-    kind: Literal["question", "ready_for_search", "urgent_escalation"]
+    kind: Literal["question", "ready_for_search"]
     question: str | None = Field(default=None, min_length=1, max_length=MAX_QUESTION_CHARS)
 
     @model_validator(mode="after")

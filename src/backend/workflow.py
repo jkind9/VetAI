@@ -14,6 +14,7 @@ from backend.schemas import (
     AdaptiveDecision,
     Assessment,
     AssessmentDraft,
+    EmergencyCheck,
     EvidenceItem,
     InvalidTurnRequest,
     Message,
@@ -51,12 +52,21 @@ TModel = TypeVar("TModel", bound=BaseModel)
 
 
 def run_turn(turn: TurnRequest, chains: Any, searcher: Any) -> TurnResult:
-    """Advance one safe state using deterministic policy around three model chains."""
+    """Advance one safe state using deterministic policy around four model chains."""
     _validate_history(turn.history)
 
     emergency = find_emergency(_owner_written_text(turn))
     if emergency is not None:
         return _emergency_result(emergency.rule)
+
+    raw_emergency_check = _call_stage(
+        "emergency_check", chains.check_for_emergency, turn
+    )
+    emergency_check = _validate_chain_output(
+        EmergencyCheck, raw_emergency_check, stage="emergency_check"
+    )
+    if emergency_check.emergency:
+        return _emergency_result("model_emergency_check")
 
     completed_pairs = len(turn.history) // 2
     standard = next_standard_question(completed_pairs)
@@ -80,8 +90,6 @@ def run_turn(turn: TurnRequest, chains: Any, searcher: Any) -> TurnResult:
         decision = _validate_chain_output(
             AdaptiveDecision, raw_decision, stage="adaptive_question"
         )
-        if decision.kind == "urgent_escalation":
-            return _emergency_result("model_urgent_escalation")
         if decision.kind == "question":
             return TurnResult(
                 kind="question",

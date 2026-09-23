@@ -1,4 +1,4 @@
-"""Three explicit LangChain/Ollama stages for question, query, and synthesis."""
+"""Four explicit LangChain/Ollama stages for safety, questions, query, and synthesis."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from typing import Any
 from backend.schemas import (
     AdaptiveDecision,
     AssessmentDraft,
+    EmergencyCheck,
     EvidenceItem,
     FailureReason,
     ModelOutputError,
@@ -20,6 +21,7 @@ from backend.schemas import (
 )
 
 PROMPT_ROOT = Path(__file__).resolve().parents[2] / "prompts"
+EMERGENCY_PROMPT_PATH = PROMPT_ROOT / "emergency_check.md"
 ADAPTIVE_PROMPT_PATH = PROMPT_ROOT / "adaptive_question.md"
 SEARCH_PROMPT_PATH = PROMPT_ROOT / "search_queries.md"
 SYNTHESIS_PROMPT_PATH = PROMPT_ROOT / "evidence_synthesis.md"
@@ -30,14 +32,12 @@ HUMAN_MARKER = "<!-- human -->"
 
 MODE_INSTRUCTIONS: dict[QuestionMode, str] = {
     "question_required": (
-        "Return `urgent_escalation` if the owner-reported signs may need an emergency veterinarian "
-        "now. Otherwise return `question` and ask exactly one useful question. This is the first "
-        "adaptive turn, so `ready_for_search` is not allowed."
+        "Return `question` and ask exactly one useful question. This is the first adaptive turn, "
+        "so `ready_for_search` is not allowed."
     ),
     "question_or_ready": (
-        "Return `urgent_escalation` if the owner-reported signs may need an emergency veterinarian "
-        "now. Otherwise return one useful question if an important descriptive detail is still "
-        "missing, or `ready_for_search` with question set to null."
+        "Return one useful question if an important descriptive detail is still missing, or "
+        "`ready_for_search` with question set to null."
     ),
 }
 
@@ -68,7 +68,7 @@ class PromptFile:
 
 
 class OllamaChatModel:
-    """Share one local model across three separately inspectable LangChain pipelines."""
+    """Share one local model across four separately inspectable LangChain pipelines."""
 
     def __init__(
         self,
@@ -78,6 +78,7 @@ class OllamaChatModel:
         temperature: float = 0.0,
         seed: int = 42,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
+        emergency_prompt: PromptFile | None = None,
         adaptive_prompt: PromptFile | None = None,
         search_prompt: PromptFile | None = None,
         synthesis_prompt: PromptFile | None = None,
@@ -87,6 +88,7 @@ class OllamaChatModel:
         from langchain_ollama import ChatOllama
 
         self.model = model
+        self.emergency_prompt = emergency_prompt or PromptFile.load(EMERGENCY_PROMPT_PATH)
         self.adaptive_prompt = adaptive_prompt or PromptFile.load(ADAPTIVE_PROMPT_PATH)
         self.search_prompt = search_prompt or PromptFile.load(SEARCH_PROMPT_PATH)
         self.synthesis_prompt = synthesis_prompt or PromptFile.load(SYNTHESIS_PROMPT_PATH)
@@ -98,6 +100,9 @@ class OllamaChatModel:
             seed=seed,
             num_predict=900,
             client_kwargs={"timeout": timeout},
+        )
+        self._emergency_chain = self._make_chain(
+            ChatPromptTemplate, llm, self.emergency_prompt, EmergencyCheck
         )
         self._adaptive_chain = self._make_chain(
             ChatPromptTemplate, llm, self.adaptive_prompt, AdaptiveDecision
@@ -120,10 +125,14 @@ class OllamaChatModel:
     @property
     def prompt_hashes(self) -> dict[str, str]:
         return {
+            "emergency_check": self.emergency_prompt.sha256,
             "adaptive_question": self.adaptive_prompt.sha256,
             "search_query": self.search_prompt.sha256,
             "evidence_synthesis": self.synthesis_prompt.sha256,
         }
+
+    def check_for_emergency(self, turn: TurnRequest) -> EmergencyCheck:
+        return self._invoke(self._emergency_chain, _turn_variables(turn), "emergency_check")
 
     def propose_adaptive_question(
         self, turn: TurnRequest, mode: QuestionMode
