@@ -53,7 +53,11 @@ def test_runtime_app_builds_chains_and_searcher_from_settings(monkeypatch) -> No
     assert response.json() == {"status": "ok"}
     assert constructed == {
         "model": "gpt-oss:20b",
-        "chain_kwargs": {"base_url": "http://localhost:11434/", "timeout": 25.0},
+        "chain_kwargs": {
+            "base_url": "http://localhost:11434/",
+            "timeout": 25.0,
+            "structured_output_method": "function_calling",
+        },
         "search_kwargs": {"timeout": 8.0, "region": "uk-en"},
     }
 
