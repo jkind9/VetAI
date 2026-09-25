@@ -8,6 +8,35 @@ from langchain_core.runnables import RunnableLambda
 
 from backend.model import OllamaChatModel, PromptFile
 from backend.schemas import AdaptiveDecision
+from backend.settings import BackendSettings
+
+
+def test_model_factory_carries_every_runtime_setting(monkeypatch) -> None:
+    constructed: dict[str, Any] = {}
+
+    def record_init(self, model: str, **kwargs: Any) -> None:
+        constructed["model"] = model
+        constructed["kwargs"] = kwargs
+
+    monkeypatch.setattr(OllamaChatModel, "__init__", record_init)
+    settings = BackendSettings(
+        model="gpt-oss:20b",
+        base_url="http://ollama:11434",
+        timeout_seconds=25,
+    )
+
+    result = OllamaChatModel.from_settings(settings)
+
+    assert isinstance(result, OllamaChatModel)
+    assert constructed == {
+        "model": "gpt-oss:20b",
+        "kwargs": {
+            "base_url": "http://ollama:11434/",
+            "timeout": 25.0,
+            "structured_output_method": "function_calling",
+            "reasoning": "low",
+        },
+    }
 
 
 def test_function_calling_chain_accepts_schema_json_when_model_ignores_tool() -> None:
