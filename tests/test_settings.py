@@ -20,7 +20,7 @@ def test_backend_settings_use_local_defaults(monkeypatch: pytest.MonkeyPatch) ->
 
     settings = BackendSettings.from_environment()
 
-    assert settings.model == "llama3:latest"
+    assert settings.model == "gpt-oss:20b"
     assert str(settings.base_url) == "http://localhost:11434/"
     assert settings.timeout_seconds == 60.0
     assert settings.search_timeout_seconds == 12.0

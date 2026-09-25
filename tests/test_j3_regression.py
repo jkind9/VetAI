@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from backend.model import SEARCH_PROMPT_PATH, PromptFile
+from backend.model import SEARCH_PROMPT_PATH, SYNTHESIS_PROMPT_PATH, PromptFile
 from backend.schemas import AdaptiveDecision, AssessmentDraft, TurnRequest
 from backend.workflow import run_turn
 from conftest import FakeChains, FakeSearcher, assessment_draft, intake, ready_history
@@ -16,6 +16,14 @@ def test_search_prompt_requires_a_normal_versus_concerning_query() -> None:
     assert "at least one query" in rules
     assert "normal or expected" in rules
     assert "concerning or abnormal" in rules
+
+
+def test_synthesis_prompt_requires_reported_abnormality_not_pathology_retrieval() -> None:
+    rules = PromptFile.load(SYNTHESIS_PROMPT_PATH).system.casefold()
+
+    assert "background references" in rules
+    assert "positive abnormal fact reported by the owner" in rules
+    assert "do not infer abnormality solely because retrieved pages describe" in rules
 
 
 def test_synthesis_schema_rejects_a_model_authored_owner_recap() -> None:
