@@ -56,6 +56,10 @@ Ollama's desktop app normally starts its local service. If it is not running, st
 in a separate terminal and leave it open. Then, in two PowerShell terminals from this project
 folder, run:
 
+The backend automatically uses function calling for the default `gpt-oss:*` family because that is
+how Ollama returns its structured results. Other model families retain the existing JSON-schema
+mode.
+
 ```powershell
 # Terminal 1: install dependencies and start the backend
 uv sync --locked --extra desktop

@@ -16,6 +16,12 @@ class BackendSettings(BaseModel):
     search_timeout_seconds: PositiveFloat = 12.0
     search_region: str = Field(default="uk-en", min_length=1, max_length=20)
 
+    @property
+    def structured_output_method(self) -> str:
+        """Use the structured-output transport supported by the selected Ollama model."""
+        model_family = self.model.casefold().split(":", maxsplit=1)[0]
+        return "function_calling" if model_family == "gpt-oss" else "json_schema"
+
     @classmethod
     def from_environment(cls) -> BackendSettings:
         return cls(

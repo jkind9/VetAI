@@ -62,6 +62,7 @@ def create_runtime_app(settings: BackendSettings | None = None) -> FastAPI:
         settings.model,
         base_url=str(settings.base_url),
         timeout=settings.timeout_seconds,
+        structured_output_method=settings.structured_output_method,
     )
     searcher = ApprovedSourceSearcher.from_defaults(
         timeout=settings.search_timeout_seconds,

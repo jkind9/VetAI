@@ -85,6 +85,10 @@ the three standard questions.
 
 ## 3. Four LangChain responsibilities
 
+All four chains share the configured local Ollama model and their typed response schemas. Runtime
+composition uses function calling for the `gpt-oss:*` family, whose structured results Ollama
+returns as tool calls; other model overrides continue to use JSON-schema structured output.
+
 ### Emergency-check chain
 
 Runs after the phrase gate on every turn the gate does not end. It receives the complete owner

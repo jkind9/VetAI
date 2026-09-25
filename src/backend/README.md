@@ -121,6 +121,10 @@ chains.generate_search_plan(turn)
 chains.synthesise_assessment(turn, evidence)
 ```
 
+Runtime composition uses function calling for `gpt-oss:*`, including the default `gpt-oss:20b`,
+because Ollama returns that family's structured results as tool calls. Other configured models keep
+the JSON-schema structured-output method.
+
 The emergency-check chain returns `EmergencyCheck(emergency: bool)` and nothing else on every turn
 not ended by the phrase gate. The adaptive chain asks one question or indicates readiness. The first
 call uses `question_required` and the next two use `question_or_ready`. Both modes permit a question; only
