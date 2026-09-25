@@ -17,7 +17,8 @@ The launched backend reads these non-secret environment values:
 | `BACKEND_API_URL` | `http://127.0.0.1:8000` | Desktop-only backend URL |
 
 The backend selects the structured-output transport from the model family: `gpt-oss:*` uses
-function calling, while other model overrides use Ollama's JSON-schema mode.
+function calling and disables extended reasoning, while other model overrides use Ollama's
+JSON-schema mode and retain their default reasoning setting.
 
 The desktop transfer timeout is longer than one model call because a final request performs query
 generation, search, and synthesis. Individual stages remain bounded and are not automatically

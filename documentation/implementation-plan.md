@@ -90,6 +90,8 @@ composition uses function calling for the `gpt-oss:*` family, whose structured r
 normally returns as tool calls; other model overrides continue to use JSON-schema structured
 output. The gpt-oss adapter also validates schema JSON from message content when the model omits
 the forced tool call. Either route must pass the same typed schema or the stage fails closed.
+Extended reasoning is disabled for gpt-oss so its bounded output budget is used for that typed
+answer instead of ending during hidden reasoning; other model families retain their default.
 
 ### Emergency-check chain
 

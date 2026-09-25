@@ -58,7 +58,8 @@ folder, run:
 
 The backend automatically uses function calling for the default `gpt-oss:*` family because that is
 how Ollama returns its structured results. Other model families retain the existing JSON-schema
-mode.
+mode. Extended reasoning is disabled for gpt-oss so its bounded generation budget is reserved for
+the typed response rather than exhausted before an answer is emitted.
 
 ```powershell
 # Terminal 1: install dependencies and start the backend

@@ -22,6 +22,12 @@ class BackendSettings(BaseModel):
         model_family = self.model.casefold().split(":", maxsplit=1)[0]
         return "function_calling" if model_family == "gpt-oss" else "json_schema"
 
+    @property
+    def reasoning(self) -> bool | None:
+        """Keep gpt-oss's bounded generation budget available for its typed answer."""
+        model_family = self.model.casefold().split(":", maxsplit=1)[0]
+        return False if model_family == "gpt-oss" else None
+
     @classmethod
     def from_environment(cls) -> BackendSettings:
         return cls(

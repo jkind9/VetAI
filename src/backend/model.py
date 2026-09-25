@@ -83,6 +83,7 @@ class OllamaChatModel:
         search_prompt: PromptFile | None = None,
         synthesis_prompt: PromptFile | None = None,
         structured_output_method: str = "json_schema",
+        reasoning: bool | str | None = None,
     ) -> None:
         from langchain_core.prompts import ChatPromptTemplate
         from langchain_ollama import ChatOllama
@@ -99,6 +100,7 @@ class OllamaChatModel:
             temperature=temperature,
             seed=seed,
             num_predict=900,
+            reasoning=reasoning,
             client_kwargs={"timeout": timeout},
         )
         self._emergency_chain = self._make_chain(
