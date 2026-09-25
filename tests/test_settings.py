@@ -22,6 +22,7 @@ def test_backend_settings_use_local_defaults(monkeypatch: pytest.MonkeyPatch) ->
 
     assert settings.model == "gpt-oss:20b"
     assert settings.structured_output_method == "function_calling"
+    assert settings.reasoning is False
     assert str(settings.base_url) == "http://localhost:11434/"
     assert settings.timeout_seconds == 60.0
     assert settings.search_timeout_seconds == 12.0
@@ -39,6 +40,7 @@ def test_backend_settings_accept_environment_overrides(monkeypatch: pytest.Monke
 
     assert settings.model == "gpt-oss:20b"
     assert settings.structured_output_method == "function_calling"
+    assert settings.reasoning is False
     assert str(settings.base_url) == "http://ollama:11434/"
     assert settings.timeout_seconds == 25.0
     assert settings.search_timeout_seconds == 8.0
@@ -49,6 +51,7 @@ def test_backend_settings_keep_json_schema_for_non_gpt_oss_models() -> None:
     settings = BackendSettings(model="llama3:latest")
 
     assert settings.structured_output_method == "json_schema"
+    assert settings.reasoning is None
 
 
 @pytest.mark.parametrize(
