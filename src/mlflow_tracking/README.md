@@ -10,7 +10,7 @@ Each chat turn (one `POST /v1/chat`) is one MLflow **run** in the `vetai-chat` e
 
 | Kind | Name | Meaning |
 | --- | --- | --- |
-| parameter | `model` | the Ollama model tag, for example `llama3:latest` |
+| parameter | `model` | the Ollama model tag, by default `gpt-oss:20b` |
 | parameter | `emergency_check`, `adaptive_question`, `search_query`, `evidence_synthesis` | a SHA-256 of each prompt file, so runs made with different prompt text can be told apart |
 | parameter | `species` | dog or cat |
 | parameter | `answered_questions` | how many questions the owner had answered before this turn (0 to 6) |

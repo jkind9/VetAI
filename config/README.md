@@ -9,7 +9,7 @@ The launched backend reads these non-secret environment values:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `VETAI_OLLAMA_MODEL` | `llama3:latest` | Installed Ollama model used by all three chains |
+| `VETAI_OLLAMA_MODEL` | `gpt-oss:20b` | Installed Ollama model used by all four chains |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Local Ollama server URL |
 | `VETAI_OLLAMA_TIMEOUT_SECONDS` | `60` | Per-model-call timeout |
 | `VETAI_SEARCH_TIMEOUT_SECONDS` | `12` | Overall approved-source search/fetch budget |

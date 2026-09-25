@@ -34,6 +34,9 @@ results from an approved veterinary-source list, and pass that evidence to a fin
 The result separates what the owner reported, possible areas a veterinarian may consider,
 source-backed suggested actions (including useful things to observe or record), questions to
 discuss with a veterinarian, and the sources used.
+Retrieved pages are background references rather than evidence that the animal has a condition.
+The synthesis prompt requires a positive abnormal fact reported by the owner before it may return
+`possible_problem`; pathology pages alone are not enough.
 Curated emergency phrases in owner-written text still bypass every model and search step and return
 a fixed emergency notice.
 
@@ -46,7 +49,7 @@ deliberately narrow: they can miss a real emergency and they can fire on mislead
 Install [Ollama](https://ollama.com/) and download the default model once:
 
 ```powershell
-ollama pull llama3:latest
+ollama pull gpt-oss:20b
 ```
 
 Ollama's desktop app normally starts its local service. If it is not running, start `ollama serve`
@@ -136,7 +139,7 @@ The client calls `http://127.0.0.1:8000` by default. Override the model, Ollama 
 desktop API URL without committing machine-specific values:
 
 ```powershell
-$env:VETAI_OLLAMA_MODEL = "llama3:latest"
+$env:VETAI_OLLAMA_MODEL = "gpt-oss:20b"
 $env:OLLAMA_BASE_URL = "http://localhost:11434"
 $env:VETAI_OLLAMA_TIMEOUT_SECONDS = "60"
 $env:BACKEND_API_URL = "http://127.0.0.1:8000"
@@ -146,7 +149,7 @@ The automated tests use a stand-in model. To check the real adapter, install
 [Ollama](https://ollama.com/), pull the model, then run the opt-in test:
 
 ```bash
-ollama pull llama3:latest
+ollama pull gpt-oss:20b
 VETAI_RUN_OLLAMA_SMOKE=1 uv run pytest tests/test_ollama_smoke.py -v -s
 ```
 
@@ -219,7 +222,7 @@ named Ollama volume keeps downloaded models between container restarts.
 
 ```powershell
 docker compose up --build -d
-docker compose exec ollama ollama pull llama3:latest
+docker compose exec ollama ollama pull gpt-oss:20b
 ```
 
 The compose file uses Ollama's official default image for local exploration. Set `OLLAMA_IMAGE` to

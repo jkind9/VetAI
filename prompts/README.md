@@ -7,7 +7,7 @@ The backend uses four separate prompt files so each LangChain stage has one resp
 | `emergency_check.md` | Runs on every turn not ended by the phrase gate: decide yes or no whether the owner-reported signs may need an emergency vet now, including misspellings and pet names; yes when unsure |
 | `adaptive_question.md` | Ask one useful question, or after the mandatory first adaptive answer declare readiness. It cannot escalate; the emergency check does that |
 | `search_queries.md` | Convert the answered history into one to three neutral, short, privacy-checked queries, including a normal/expected versus concerning/abnormal comparison |
-| `evidence_synthesis.md` | Choose a non-emergency outcome and produce cited possible areas, suggested actions, and vet questions from approved evidence |
+| `evidence_synthesis.md` | Choose a non-emergency outcome and produce cited possible areas, suggested actions, and vet questions from approved evidence; pathology pages alone cannot establish a problem without a positive owner-reported abnormality |
 
 Each file contains `<!-- system -->` and `<!-- human -->` markers. `PromptFile.load` splits on those
 markers and hashes the whole file. Every MLflow run records all four hashes as parameters, so runs

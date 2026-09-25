@@ -133,6 +133,10 @@ All four prompt files use `<!-- system -->` and `<!-- human -->` markers. `Promp
 on those markers, and `app.py` records each file's SHA-256 on every MLflow run. That makes the exact
 prompt version used for a result inspectable without copying prompt text into configuration.
 
+Retrieved pages are background references, not evidence that the animal has a condition. The
+synthesis prompt requires a positive abnormal fact reported by the owner before it can choose
+`possible_problem`, so pathology-oriented results alone cannot set the outcome.
+
 The synthesis draft chooses only `possible_problem` or `nothing_flagged`. The workflow supplies the
 owner-visible wording, requires possible areas only for `possible_problem`, validates citations for
 all possible areas, suggested actions, and veterinarian questions, and resolves source metadata.

@@ -17,7 +17,7 @@ pytestmark = [
     ),
 ]
 
-MODEL_TAG = os.environ.get("VETAI_OLLAMA_MODEL", "llama3:latest")
+MODEL_TAG = os.environ.get("VETAI_OLLAMA_MODEL", "gpt-oss:20b")
 
 
 @pytest.fixture(scope="module")

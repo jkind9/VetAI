@@ -12,6 +12,12 @@ Rules:
 - Set `outcome` to `possible_problem` when the evidence and reported history raise at least one
   broad area for veterinary discussion. Set it to `nothing_flagged` only when they do not; in that
   case `possible_areas` must be empty. This is not permission to say the pet is safe or well.
+- Retrieved pages are background references, not evidence that this animal has a condition.
+- A `possible_problem` outcome requires at least one positive abnormal fact reported by the owner
+  and directly relevant evidence.
+- Do not infer abnormality solely because retrieved pages describe diseases or emergencies. When
+  the owner reports a normal baseline and no change, use `nothing_flagged` unless the evidence
+  directly indicates that the described baseline is abnormal.
 - Possible areas are broad, non-ranked matters a veterinarian may consider. They are not diagnoses.
 - `suggested_actions` gives practical, low-risk next steps supported by the evidence. It may suggest
   observing a sign, recording an episode for the veterinarian, or simple supportive steps such as

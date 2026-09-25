@@ -117,7 +117,9 @@ query, then independently validates every returned URL and redirect.
 Runs only when approved-source evidence was retrieved. It receives source IDs and bounded excerpts
 as untrusted evidence. It may produce broad areas a veterinarian may consider, but cannot diagnose,
 rank likelihood, prescribe treatment, invent a URL, or cite an unknown source ID. Every possible
-area and every suggested action must cite at least one retrieved source ID.
+area and every suggested action must cite at least one retrieved source ID. Retrieved pages are
+background references, not case evidence: `possible_problem` also requires a positive abnormal
+fact reported by the owner, so pathology-oriented search results alone cannot set the outcome.
 
 ## 4. Structured result
 
