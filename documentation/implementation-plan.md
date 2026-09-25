@@ -87,7 +87,9 @@ the three standard questions.
 
 All four chains share the configured local Ollama model and their typed response schemas. Runtime
 composition uses function calling for the `gpt-oss:*` family, whose structured results Ollama
-returns as tool calls; other model overrides continue to use JSON-schema structured output.
+normally returns as tool calls; other model overrides continue to use JSON-schema structured
+output. The gpt-oss adapter also validates schema JSON from message content when the model omits
+the forced tool call. Either route must pass the same typed schema or the stage fails closed.
 
 ### Emergency-check chain
 

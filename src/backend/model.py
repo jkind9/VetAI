@@ -115,9 +115,19 @@ class OllamaChatModel:
         )
 
     def _make_chain(self, template_type: Any, llm: Any, prompt: PromptFile, schema: Any) -> Any:
+        from langchain_core.runnables import RunnableLambda
+
         template = template_type.from_messages(
             [("system", prompt.system), ("human", prompt.human)]
         )
+        if self.structured_output_method == "function_calling":
+            structured_llm = llm.with_structured_output(
+                schema, method=self.structured_output_method, include_raw=True
+            )
+            parse_result = RunnableLambda(
+                lambda result: _parse_function_calling_result(result, schema)
+            )
+            return template | structured_llm | parse_result
         return template | llm.with_structured_output(
             schema, method=self.structured_output_method
         )
@@ -165,6 +175,16 @@ class OllamaChatModel:
             raise ModelOutputError(
                 _failure_reason(error), type(error).__name__, stage=stage
             ) from error
+
+
+def _parse_function_calling_result(result: dict[str, Any], schema: Any) -> Any:
+    """Validate gpt-oss output whether Ollama used a tool call or JSON message content."""
+    if result.get("parsed") is not None:
+        return result["parsed"]
+    content = getattr(result.get("raw"), "content", None)
+    if not isinstance(content, str):
+        return None
+    return schema.model_validate_json(content)
 
 
 def _turn_variables(turn: TurnRequest) -> dict[str, str]:
