@@ -196,11 +196,7 @@ def live_components() -> tuple[BackendSettings, OllamaChatModel, ApprovedSourceS
     settings = BackendSettings.from_environment()
     return (
         settings,
-        OllamaChatModel(
-            settings.model,
-            base_url=str(settings.base_url),
-            timeout=settings.timeout_seconds,
-        ),
+        OllamaChatModel.from_settings(settings),
         ApprovedSourceSearcher.from_defaults(
             timeout=settings.search_timeout_seconds,
             region=settings.search_region,

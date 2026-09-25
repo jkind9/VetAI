@@ -20,7 +20,7 @@ up-to-date public repository.
 
 ## Surgical work order
 
-### 1. Align every real-model path with production
+### 1. Align every real-model path with production — complete 2026-09-25
 
 Named paths:
 
@@ -35,6 +35,15 @@ Named paths:
 Exit gate: the application and all three opt-in model suites construct `OllamaChatModel` through
 one settings-aware factory, covered by a focused regression test. The 14-case emergency evaluation
 must execute the same transport and reasoning configuration as the launched backend.
+
+Evidence after alignment:
+
+- focused factory/runtime gate: 10 passed;
+- 14-case real-model emergency evaluation: passed;
+- four-stage real-model smoke: 3 passed, synthesis failed closed on invalid gpt-oss output.
+
+The remaining synthesis capability failure belongs to items 2 and 3; it is no longer obscured by
+evaluation/runtime configuration drift.
 
 ### 2. Add the all-normal negative-control journey (J4)
 

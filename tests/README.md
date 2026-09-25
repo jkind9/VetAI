@@ -47,6 +47,9 @@ The dedicated emergency-check quality evaluation is also opt-in. It calls the re
 model directly for seven clear emergencies and seven ordinary statements, then records aggregate
 MLflow metrics:
 
+All opt-in model suites construct the adapter through the same settings-aware factory as the
+launched backend, including model-family structured-output and reasoning settings.
+
 ```powershell
 $env:VETAI_RUN_EMERGENCY_CHECK_LIVE = "1"
 uv run pytest tests/test_emergency_check_live.py -v -s

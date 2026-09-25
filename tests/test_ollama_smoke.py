@@ -7,6 +7,7 @@ import os
 import pytest
 
 from backend.schemas import EvidenceItem, TurnRequest
+from backend.settings import BackendSettings
 from conftest import evidence, intake, ready_history, standard_history
 
 pytestmark = [
@@ -24,7 +25,7 @@ MODEL_TAG = os.environ.get("VETAI_OLLAMA_MODEL", "gpt-oss:20b")
 def chains():
     from backend.model import OllamaChatModel
 
-    return OllamaChatModel(MODEL_TAG)
+    return OllamaChatModel.from_settings(BackendSettings(model=MODEL_TAG))
 
 
 def test_adaptive_chain_returns_a_required_question(chains) -> None:

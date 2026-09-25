@@ -58,13 +58,7 @@ def _serve_browser_client(app: FastAPI, dist: Path = PUBLIC_CLIENT_DIST) -> None
 
 def create_runtime_app(settings: BackendSettings | None = None) -> FastAPI:
     settings = settings or BackendSettings.from_environment()
-    chains = OllamaChatModel(
-        settings.model,
-        base_url=str(settings.base_url),
-        timeout=settings.timeout_seconds,
-        structured_output_method=settings.structured_output_method,
-        reasoning=settings.reasoning,
-    )
+    chains = OllamaChatModel.from_settings(settings)
     searcher = ApprovedSourceSearcher.from_defaults(
         timeout=settings.search_timeout_seconds,
         region=settings.search_region,

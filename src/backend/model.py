@@ -6,7 +6,10 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Self
+
+if TYPE_CHECKING:
+    from backend.settings import BackendSettings
 
 from backend.schemas import (
     AdaptiveDecision,
@@ -69,6 +72,17 @@ class PromptFile:
 
 class OllamaChatModel:
     """Share one local model across four separately inspectable LangChain pipelines."""
+
+    @classmethod
+    def from_settings(cls, settings: BackendSettings) -> Self:
+        """Construct the model adapter through the same settings path used in production."""
+        return cls(
+            settings.model,
+            base_url=str(settings.base_url),
+            timeout=settings.timeout_seconds,
+            structured_output_method=settings.structured_output_method,
+            reasoning=settings.reasoning,
+        )
 
     def __init__(
         self,

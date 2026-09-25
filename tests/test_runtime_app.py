@@ -25,6 +25,16 @@ def test_runtime_app_builds_chains_and_searcher_from_settings(monkeypatch) -> No
     class StubChains:
         prompt_hashes = STUB_PROMPT_HASHES
 
+        @classmethod
+        def from_settings(cls, settings: BackendSettings) -> StubChains:
+            return cls(
+                settings.model,
+                base_url=str(settings.base_url),
+                timeout=settings.timeout_seconds,
+                structured_output_method=settings.structured_output_method,
+                reasoning=settings.reasoning,
+            )
+
         def __init__(self, model: str, **kwargs: Any) -> None:
             constructed["model"] = model
             constructed["chain_kwargs"] = kwargs
@@ -66,6 +76,10 @@ def test_runtime_app_builds_chains_and_searcher_from_settings(monkeypatch) -> No
 def test_runtime_app_records_the_model_and_prompt_versions_on_each_run(monkeypatch) -> None:
     class StubChains:
         prompt_hashes = STUB_PROMPT_HASHES
+
+        @classmethod
+        def from_settings(cls, settings: BackendSettings) -> StubChains:
+            return cls(settings.model)
 
         def __init__(self, model: str, **kwargs: Any) -> None:
             pass

@@ -9,6 +9,7 @@ import pytest
 
 from backend.model import OllamaChatModel
 from backend.schemas import Intake, TurnRequest
+from backend.settings import BackendSettings
 from mlflow_tracking.chat_runs import start_tracking
 
 pytestmark = [
@@ -46,7 +47,7 @@ def _turn(concern: str) -> TurnRequest:
 
 def test_real_emergency_check_catches_all_clear_cases_without_false_alarms() -> None:
     start_tracking()
-    chains = OllamaChatModel(MODEL_TAG)
+    chains = OllamaChatModel.from_settings(BackendSettings(model=MODEL_TAG))
 
     with mlflow.start_run(run_name="emergency_check_live_eval"):
         emergency_results = [
