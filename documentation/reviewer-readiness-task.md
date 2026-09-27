@@ -101,6 +101,39 @@ readiness; all three follow-up J4 runs reached synthesis, where a separate struc
 failure remained. Requiring non-empty useful sections for `nothing_flagged` resolved the reproduced
 shape; the remaining two failures in the latest set are at live search.
 
+#### Demo-readiness pass — 2026-09-27 afternoon
+
+The owner ruled that reasonable, widely accepted general veterinary guidance is acceptable when it
+does not contradict the retrieved sources. That replaced the stricter review rule under which the
+13:08 set scored J3 0/3 and J4 1/3 (flushed face, routine checks and similar details were failed
+only for not appearing on the cited page).
+
+Changes, each with a failing test first:
+
+1. Synthesis prompt v2 allows that general guidance; the human-review checklist matches it.
+2. Search retries use exponential backoff (1, 2, 4 s), and a retry starts only if it should finish
+   inside a 20 s search budget.
+3. A search-service failure no longer ends the turn. The summary is written from general guidance
+   with a "search did not work" notice and no sources. An unsafe query or an unexpected searcher
+   bug still returns an error, and uncited items are rejected whenever sources were found.
+4. The model now has a 16,384-token context window. Ollama's default of about 2,048 tokens silently
+   dropped the start of any longer synthesis prompt, including the rules and owner report. Every
+   failed synthesis in the 13:30 set had exactly 2,050 prompt tokens and failed 3/3 on replay (empty
+   reply, or an invented "pubmed" tool call); with the larger window the same inputs pass.
+
+Live results on gpt-oss:20b after all four changes (13:39 set), each reviewed by hand:
+
+| Run | Automated | Human review | Note |
+| --- | --- | --- | --- |
+| J3 run 1 | pass | pass | The scripted harness gave one answer twice; not an app defect |
+| J3 run 2 | fail | fail | Search service down on all 4 attempts; the fallback summary and notice worked |
+| J3 run 3 | pass | pass | One source title joins several page titles together (cosmetic) |
+| J4 run 1 | pass | pass | |
+| J4 run 2 | pass | pass | |
+| J4 run 3 | pass | pass | |
+
+J3 is 2/3 and J4 is 3/3. The remaining J3 failure depends on the external search service.
+
 ### 4. Complete MLflow quality evidence
 
 Named paths:
