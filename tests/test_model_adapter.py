@@ -117,3 +117,57 @@ def test_function_calling_parser_recovers_known_grounded_item_field_names() -> N
         parsed.questions_for_veterinarian[0].text
         == "What changes should I monitor?"
     )
+
+
+def test_model_sets_a_context_window_that_fits_the_largest_prompt(monkeypatch) -> None:
+    """Ollama's default window (about 2,048 tokens) silently cut the rules off long prompts."""
+    import json
+
+    import langchain_ollama
+
+    from backend import model as model_module
+    from backend.schemas import (
+        MAX_CONCERN_CHARS,
+        MAX_EVIDENCE_CHARS,
+        MAX_HISTORY_MESSAGES,
+        MAX_MESSAGE_CHARS,
+    )
+    from backend.search import MAX_EVIDENCE_ITEMS
+
+    constructed: dict[str, Any] = {}
+
+    class RecordingChatOllama:
+        def __init__(self, **kwargs: Any) -> None:
+            constructed.update(kwargs)
+
+        def with_structured_output(self, *args: Any, **kwargs: Any) -> RunnableLambda:
+            return RunnableLambda(lambda _: None)
+
+    monkeypatch.setattr(langchain_ollama, "ChatOllama", RecordingChatOllama)
+    OllamaChatModel("gpt-oss:20b")
+
+    prompt = PromptFile.load(model_module.SYNTHESIS_PROMPT_PATH)
+    evidence = json.dumps(
+        [
+            {
+                "source_id": f"S{n}",
+                "title": "t" * 300,
+                "url": "https://www.example.org/" + "p" * 100,
+                "organisation": "o" * 60,
+                "excerpt": "e" * MAX_EVIDENCE_CHARS,
+            }
+            for n in range(1, MAX_EVIDENCE_ITEMS + 1)
+        ],
+        indent=2,
+    )
+    worst_case_chars = (
+        len(prompt.system)
+        + len(prompt.human)
+        + MAX_CONCERN_CHARS
+        + MAX_HISTORY_MESSAGES * (MAX_MESSAGE_CHARS + 20)
+        + len(evidence)
+    )
+    # Real English page text runs about 4 characters per token; 3 leaves a safety margin.
+    worst_case_tokens = worst_case_chars // 3
+
+    assert constructed["num_ctx"] >= worst_case_tokens + constructed["num_predict"]

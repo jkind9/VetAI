@@ -54,7 +54,7 @@ def test_synthesis_prompt_handles_an_empty_evidence_list() -> None:
     rules = " ".join(PromptFile.load(SYNTHESIS_PROMPT_PATH).system.casefold().split())
 
     assert "if the evidence list is empty" in rules
-    assert '`{{"text": "...", "source_ids": []}}`' in rules
+    assert '`{{"text": "...", "source_ids": ["none"]}}`' in rules
 
 
 def test_synthesis_schema_rejects_a_model_authored_owner_recap() -> None:

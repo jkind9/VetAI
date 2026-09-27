@@ -30,6 +30,10 @@ SEARCH_PROMPT_PATH = PROMPT_ROOT / "search_queries.md"
 SYNTHESIS_PROMPT_PATH = PROMPT_ROOT / "evidence_synthesis.md"
 DEFAULT_BASE_URL = "http://localhost:11434"
 DEFAULT_TIMEOUT_SECONDS = 60.0
+# Ollama's default context window (about 2,048 tokens) silently drops the start of a longer
+# prompt, which removed the synthesis rules whenever the retrieved pages were long. The largest
+# possible synthesis prompt is about 12,000 tokens, so this leaves room for the reply.
+CONTEXT_WINDOW_TOKENS = 16_384
 SYSTEM_MARKER = "<!-- system -->"
 HUMAN_MARKER = "<!-- human -->"
 
@@ -114,6 +118,7 @@ class OllamaChatModel:
             temperature=temperature,
             seed=seed,
             num_predict=900,
+            num_ctx=CONTEXT_WINDOW_TOKENS,
             reasoning=reasoning,
             client_kwargs={"timeout": timeout},
         )

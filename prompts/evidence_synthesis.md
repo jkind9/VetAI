@@ -34,7 +34,8 @@ Rules:
   something the owner reported.
 - If the evidence list is empty, the source search did not work. Base every item only on
   reasonable, widely accepted general veterinary guidance and write each item exactly like
-  `{{"text": "...", "source_ids": []}}`. The application tells the owner the search did not work.
+  `{{"text": "...", "source_ids": ["none"]}}`. The application tells the owner the search did not
+  work.
 - Each entry in those three sections must be an object exactly like
   `{{"text": "...", "source_ids": ["S1"]}}`. Never return a bare string.
 - Do not put citations inside `text`; list them only in the object's `source_ids` array.
