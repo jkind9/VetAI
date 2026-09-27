@@ -1,32 +1,39 @@
-# Versioned LangChain prompts
+# Prompts
 
-The backend uses four separate prompt files so each LangChain stage has one responsibility:
+Each of the four model steps has its own prompt file. Keeping them apart means each prompt has one
+job, and each can be changed and tested on its own.
 
-| Prompt | Chain responsibility |
-| --- | --- |
-| `emergency_check.md` | Runs on every turn not ended by the phrase gate: decide yes or no whether the owner-reported signs may need an emergency vet now, including misspellings and pet names; yes when unsure |
-| `adaptive_question.md` | Ask one useful question, or after the mandatory first adaptive answer declare readiness. It cannot escalate; the emergency check does that |
-| `search_queries.md` | Convert the answered history into one to three neutral, short, privacy-checked queries, including a normal/expected versus concerning/abnormal comparison |
-| `evidence_synthesis.md` | Choose a non-emergency outcome and produce cited possible areas, suggested actions, and vet questions from approved evidence; pathology pages alone cannot establish a problem without a positive owner-reported abnormality |
+| File | Model step | What the prompt tells the model |
+| --- | --- | --- |
+| `emergency_check.md` | Emergency check, on every message | Answer only yes or no: could the signs the owner reported need an emergency vet now? It lists the warning signs (from Cornell's emergency guidance), allows for pet names and misspellings, respects "she isn't having trouble breathing", and says to answer yes when unsure |
+| `adaptive_question.md` | Follow-up question | Ask one short question for a detail not already given, or say there is enough. Never suggest a cause, treatment, or reassurance |
+| `search_queries.md` | Search queries | Write one to three short, neutral queries. At least one must ask whether the main sign is normal or worrying. No personal details, web addresses or copied sentences |
+| `evidence_synthesis.md` | Summary | Choose "possible problem" or "nothing flagged" and write the sections, citing the pages read. May add widely accepted general vet guidance that fits the report. If no pages were found, write from general guidance with no citations |
 
-Each file contains `<!-- system -->` and `<!-- human -->` markers. `PromptFile.load` splits on those
-markers and hashes the whole file. Every MLflow run records all four hashes as parameters, so runs
-made with different prompt text can be told apart.
+The model steps are told what they may not do, but the code enforces the rules that matter.
+The code, not the prompts, decides:
 
-The backend, not prompt wording, owns the fixed question prefix, minimum/maximum adaptive count,
-emergency route, source allowlist, citation validation, and final disclaimer.
+- the three standard questions and when follow-ups start and stop;
+- the emergency notice's wording, and that an emergency ends the chat;
+- which websites search may use;
+- that every citation is a page that was actually read;
+- the recap of what the owner said, the outcome wording, and the disclaimer.
 
-The emergency prompt is a standalone chain, not a branch of the adaptive prompt. On every pass
-through the question loop not already ended by the phrase gate, it runs before the workflow returns
-another question or begins search. The adaptive prompt cannot suggest causes, escalate, or write
-the emergency notice. The query prompt cannot
-diagnose or send raw transcript text to search. The synthesis prompt runs after retrieval, treats
-page content as untrusted data, requires source IDs for possible areas and suggested actions, and
-cannot write the owner recap, invent URLs, or author owner-visible outcome wording.
+## File format
 
-There is no automatic structured-output repair call. A malformed chain output fails the current
-turn and leaves manual retry to the owner.
+Each file has a `<!-- system -->` section (the instructions) and a `<!-- human -->` section (the
+owner's details, filled in for each message). `PromptFile.load` in `src/backend/model.py` splits
+the two and takes a SHA-256 fingerprint of the whole file. Every MLflow run records all four
+fingerprints, so you can tell which prompt text produced which result.
 
-After editing prompts, run the deterministic suite and the opt-in Ollama smoke checks. Passing shape
-tests does not establish medical quality; use the human-review rules in
-[`documentation/test-cases.md`](../documentation/test-cases.md).
+## Changing a prompt
+
+1. Edit the file, and bump the version in its title (for example "v1" to "v2").
+2. Run `uv run pytest`. `tests/test_j3_regression.py` checks for rules that earlier real chats
+   showed were needed, such as the normal-or-worrying search query.
+3. Run the opt-in real-model checks (see [`tests/README.md`](../tests/README.md)), and compare
+   runs before and after the change in MLflow using the prompt fingerprint.
+
+Passing these checks shows the replies have the right shape. It doesn't show the advice is good:
+that needs a person to review real chats against the rules in
+[`documentation/test-cases.md`](../documentation/test-cases.md#human-review-rules).

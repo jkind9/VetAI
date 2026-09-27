@@ -1,260 +1,100 @@
 # VetAI implementation plan
 
-## 1. Product outcome
+This is the plan the project started from, followed by the key points where it changed on the way
+to what exists now. For how the app works today, read the [root README](../README.md) and the
+[backend README](../src/backend/README.md).
 
-VetAI is a local demonstration of a bounded, multi-chain pet-concern conversation. It does not
-diagnose, prescribe, rank conditions, or decide that a pet is safe. Its purpose is to collect a
-clearer history, retrieve relevant information from a reviewed source list, and help an owner
-prepare for a conversation with a veterinarian.
+## The initial plan
 
-The owner gets:
+The brief asks for a simple AI pet triage built with LangChain and MLflow, and says it cares more
+about the internals than the interface. The plan read "triage" narrowly: help an owner describe a
+worry clearly and prepare for a vet visit. No diagnosis, no treatment advice, and no urgency
+score, apart from a short list of warning phrases that send the owner straight to an emergency
+vet.
 
-1. a chat rather than a long intake form;
-2. three short, predictable questions;
-3. between one and three adaptive LLM questions;
-4. a source-grounded `possible_problem` or `nothing_flagged` result split into reported facts,
-   possible areas, suggested actions, questions for a veterinarian, and sources; or
-5. a fixed emergency notice when either the narrow phrase matcher or the dedicated model emergency
-   check escalates. Both are part of every turn; a phrase match ends the turn before the model call.
+It planned:
 
-The original brief prioritises LangChain usage and engineering internals over interface polish.
-This design therefore makes the distinct LangChain stages and their boundaries visible and
-testable. Each turn is recorded in MLflow (`src/mlflow_tracking`): one run per turn, with the
-turn's chain calls traced inside it.
-
-## 2. Ordered conversation
-
-```text
-owner concern or answer (one POST /v1/chat turn)
-      |
-      v
-validate request and history
-      |
-      v
-scan all owner-authored text for curated emergency phrases     <-- every turn
-      | match
-      +--------------------------> fixed emergency notice; end
-      |
-      v
-standalone emergency-check chain: may the reported signs      <-- every turn
-need an emergency vet now?
-      | true (or unsure)
-      +--------------------------> fixed emergency notice; end
-      | check fails
-      +--------------------------> 503; owner may retry
-      |
-      v
-choose the current question-loop phase
-      +-- fixed question due --> return next fixed question --> owner answers --> next turn
-      |
-      +-- 0 to 2 adaptive answers --> adaptive-question chain
-      |                                  +-- question --> owner answers --> next turn
-      |                                  +-- ready --+
-      |                                              |
-      +-- 3 adaptive answers: no adaptive call ------+
-                                                     v
-search-query chain (neutral, short queries derived from all answers)
-      |
-      v
-approved-source web search and bounded page extraction
-      |
-      v
-post-search evidence-synthesis chain
-      |
-      v
-structured assessment; end
-```
-
-The emergency-check chain is therefore a standalone link *inside* the question loop, not an option
-on the adaptive-question chain. Every owner answer starts a new turn and passes through the phrase
-gate and this model check before another question can be returned or search can begin.
-
-The standard questions are, in order:
-
-1. **Duration:** “How long has this been happening?”
-2. **Previous occurrence:** “Has this happened before?”
-3. **Pattern:** “Is it happening constantly, or does it come and go?”
-
-The first adaptive question is mandatory. After the owner answers it, the adaptive chain may ask
-another useful question or declare the history ready for search. A third adaptive question is the
-hard maximum. The code counts the questions: after the third answer the workflow goes straight to
-search without asking the adaptive model, so a fourth question cannot be requested. The phrase gate
-still reads that answer and, if it does not match, the model check reads it before search starts.
-Search never runs before the owner has answered at least one adaptive question and never runs before
-the three standard questions.
-
-## 3. Four LangChain responsibilities
-
-All four chains share the configured local Ollama model and their typed response schemas. Runtime
-composition uses function calling for the `gpt-oss:*` family, whose structured results Ollama
-normally returns as tool calls; other model overrides continue to use JSON-schema structured
-output. The gpt-oss adapter also validates schema JSON from message content when the model omits
-the forced tool call. For assessment tool calls only, the known nested labels `area`, `action`, and
-`question` are normalised to the schema's shared `text` field before the complete typed schema is
-rerun; other mismatches still fail closed. Either route must pass the same typed schema.
-The gpt-oss reasoning effort is set to `low` so its bounded output budget is used for that typed
-answer instead of ending during extended reasoning; other model families retain their default.
-
-### Emergency-check chain
-
-Runs after the phrase gate on every turn the gate does not end. It receives the complete owner
-history before any question or search decision and answers one yes-or-no question: may the
-owner-reported signs need an emergency vet now?
-Its prompt names Cornell's four emergency categories (breathing difficulty, collapse, suspected
-poisoning, inability to urinate) and signs of poor oxygen such as blue or pale gums, and tells it
-to answer yes when unsure. It reasons over meaning, misspellings, pet names, and awkward wording
-rather than exact keywords. It never writes the notice. If it fails or returns malformed output,
-the turn is a `503`, never a silent pass.
-
-### Adaptive-question chain
-
-Receives the complete owner history and decides one thing: ask exactly one relevant question, or
-(after the mandatory first adaptive answer) declare the history ready for search. It cannot raise
-an emergency; the emergency-check chain alone does that. It never suggests causes, retrieves
-information, or writes the final result. If a later decision exactly repeats an answered question
-(case-insensitively), deterministic policy treats the history as ready instead of displaying the
-repeat or asking the adaptive model for a replacement.
-
-### Search-query chain
-
-Runs only after questioning is complete. It returns one to three short, neutral queries that
-describe the pet, reported concern, timing, pattern, and relevant answers. It must not include
-names, addresses, email addresses, telephone numbers, quoted transcript passages, diagnoses, or
-instructions to the search engine. The application validates queries before sending them outside
-the local machine. The retrieval adapter requests at most three raw results for each generated
-query, then independently validates every returned URL and redirect.
-
-### Evidence-synthesis chain
-
-Runs only when approved-source evidence was retrieved. It receives source IDs and bounded excerpts
-as untrusted evidence. It may produce broad areas a veterinarian may consider, but cannot diagnose,
-rank likelihood, prescribe treatment, invent a URL, or cite an unknown source ID. Every possible
-area and every suggested action must cite at least one retrieved source ID. Retrieved pages are
-background references, not case evidence: `possible_problem` also requires a positive abnormal
-fact reported by the owner, so pathology-oriented search results alone cannot set the outcome.
-Both outcomes still require at least one source-backed suggested action and one source-backed
-question for the veterinarian; `nothing_flagged` cannot invent a problem to fill those sections.
-
-## 4. Structured result
-
-The final API result is structured rather than one free-form paragraph:
-
-- `outcome`: `possible_problem` or `nothing_flagged`; emergency is returned before synthesis;
-- `outcome_wording`: fixed application text for that outcome, never model wording;
-- `what_you_reported`: application-constructed, labelled recap copied from the initial concern and
-  owner answers; it is not part of the synthesis model's output schema;
-- `possible_areas`: broad, non-ranked areas a veterinarian may consider, each with source IDs;
-- `suggested_actions`: source-backed, low-risk steps such as observing a change, recording an
-  episode for the veterinarian, or simple supportive actions when the evidence supports them;
-- `questions_for_veterinarian`: grounded questions the owner may want to raise;
-- `sources`: titles, organisations, and HTTPS URLs derived by the workflow from retrieved evidence;
-- a fixed non-diagnostic statement owned by the application.
-
-The model never supplies source URLs. It supplies source IDs; the workflow validates those IDs and
-constructs the displayed source list from evidence actually retrieved.
-
-Post-result chat is deferred. The completed view offers **New concern**. A bounded “Ask another
-question” mode can be added later with its own safety and grounding contract.
-
-## 5. Conversation state
-
-The desktop sends the complete current conversation with every request. The backend stores no
-session. A valid active history is zero to six complete assistant-question/owner-answer pairs:
-
-- pairs 1–3 are the exact standard question prefix;
-- pairs 4–6 are adaptive questions;
-- every assistant message is immediately followed by one non-blank owner answer;
-- assessment and emergency results end the conversation and are never sent back as history.
-
-The backend validates alternation, length, and the fixed three-question prefix. A custom client can
-still alter adaptive history because there is no trusted server session; that is an explicit demo
-trade-off.
-
-## 6. Safety and evidence boundaries
-
-The deterministic emergency matcher runs before every question, model call, search call, and
-synthesis call. It scans only the initial concern and owner answers, never assistant questions,
-search queries, retrieved pages, or generated output. A match ends the conversation before any
-model call. If it does not match, the emergency-check chain can still escalate from context on the
-same turn; the model chooses only the route and the application supplies the same fixed notice.
-Neither route can lower or override the other.
-
-Search is limited by [`approved-sources.md`](approved-sources.md) and the machine-readable catalog
-in `config/approved_sources.toml`. A `site:` clause improves relevance but is not a security
-boundary: every returned URL and final redirect target must use HTTPS and match an approved host or
-its subdomain. Retrieved text remains untrusted prompt input.
-
-Only short generated queries leave the machine. The raw conversation stays local. This reduces
-disclosure but is not a guarantee of anonymisation. Search providers and approved websites can see
-the query or requested URL and the machine's public IP.
-
-If no approved evidence is available, the application returns a service failure. It does not ask
-the model to produce an unsourced assessment.
-
-## 7. Failure and retry policy
-
-There are no automatic model retries, alternative models, or model-written default medical
-responses in this milestone. The search adapter makes one bounded repeat of the exact same plan
-only when every provider call failed in its first attempt; it never rephrases the query, replans,
-or swaps client. A failed structured response, model call, search, or synthesis returns the stable
-service error and preserves the current owner draft for a manual **Try again**. Input and history
-errors instead ask the owner to correct the named field. Individual unapproved or unfetchable search
-results are discarded, and a provider failure from one query does not discard raw results returned
-by another query.
-
-The full error-to-action contract is in [`failure-handling.md`](failure-handling.md) and the backend
-operator matrix is duplicated in [`../src/backend/README.md`](../src/backend/README.md).
-
-## 8. Architecture
+- **a desktop form and chat (PySide6)** asking for species, concern, how long it has been going
+  on, whether it has happened before, and whether it is constant or comes and goes;
+- **one LangChain chain** that either asks one follow-up question or writes a final recap, with at
+  most two follow-ups, counted by code;
+- **a recap of only what the owner said**, plus one or two points to raise with a vet;
+- **a fixed emergency route**: plain Python checks the owner's words for warning phrases before
+  any model call, and a match shows a fixed notice;
+- **a FastAPI backend** that the desktop only talks to over HTTP;
+- **MLflow saved to local files**: one run per chat turn, an evaluation run over fixed test cases,
+  and a small command to print counts and response times;
+- **supporting pieces**: a YAML settings file, a CI workflow, locked dependencies, and
+  temperature 0 with a fixed seed.
 
 ```text
-PySide6 desktop --\
-                  -> FastAPI /v1/chat -> workflow state machine
-Svelte browser --/                         |       |        |
-                                     safeguards  chains   search adapter
-                                                     \       /
-                                                 grounded result
+Desktop form -> POST /v1/chat -> check request -> emergency phrases?
+                                          | yes: fixed emergency notice
+                                          | no:  one LangChain + Ollama call
+                                          v
+                          one follow-up question OR the final recap
 ```
 
-- `frontend/local/app.py`: native owner-visible state, message bubbles, and pending state.
-- `frontend/local/api_client.py`: native asynchronous HTTP and public response parsing.
-- `frontend/public`: Svelte browser client served by the backend from its built `dist/` directory.
-- `backend/workflow.py`: state transitions, safety order, caps, citation validation, final result.
-- `backend/questions.py`: immutable standard-question catalog.
-- `backend/model.py`: four LangChain/Ollama chains and prompt loading, including the standalone
-  emergency check used by every question-loop turn.
-- `backend/search.py`: query privacy validation, search, allowlist enforcement, extraction limits.
-- `backend/approved_sources.py`: source-catalog loading and host validation.
-- `backend/schemas.py`: request, chain-output, evidence, and result shapes.
-- `backend/app.py`: dependency composition and HTTP route.
-- `mlflow_tracking/chat_runs.py`: one MLflow run per turn, with the turn's LangChain calls traced.
+The principles behind it, all of which still hold:
 
-The workflow depends on duck-typed chain and search objects. Tests supply stage-aware fakes, so
-ordinary tests need neither Ollama nor network access. The browser E2E suite builds the production
-Svelte bundle and drives it against a hosted FastAPI process while retaining those deterministic
-model and search boundaries.
+- code enforces the rules and the model fills in the words;
+- the model never writes the emergency notice;
+- no automatic retries and no fallback answers;
+- no memory on the server: the screen sends the whole chat each time;
+- tests use a stand-in model, so they need no Ollama or network;
+- recording in MLflow never hides or changes a reply.
 
-## 9. UI contract
+It deliberately left out a database, RAG, agents, urgency grades, a browser interface, and using a
+second model to grade answers.
 
-The initial form contains species and concern only. **Send concern** immediately shows the owner's
-concern in a right-aligned owner bubble and shows a visible assistant pending state. Standard and
-adaptive questions appear in left-aligned VetAI bubbles. Answers appear separately in owner
-bubbles. The final assessment uses labelled sections inside an assistant result surface.
+## How the plan evolved
 
-On a failed request, the current answer remains editable and **Try again** is visible. A successful
-question commits the submitted pair. Assessment or emergency ends the flow and exposes **New
-concern**. Starting a new concern clears every bubble and all in-memory state.
+**One chain became four, with web search.** To show chains working together, and to base the
+result on real veterinary pages instead of the model's memory, the single chain was split into
+separate steps: follow-up questions, search queries, and a summary. Search is limited to six
+approved vet sites, and the summary must cite the pages it used. The form shrank to species and
+concern, and the other three fields became fixed questions asked in the chat. Follow-ups became
+one to three.
 
-## 10. Deferred milestones
+**The owner's words are recapped by code, not the model.** In real test chats, the model
+sometimes changed what the owner had said when repeating it back. The recap is now built directly
+from the owner's own words.
 
-- an MLflow span for the approved-source search step, and per-stage timings as run metrics (runs
-  per turn and traced model calls already exist);
-- automated semantic validation and human-review sign-off for the recorded real-model and
-  live-search evaluations;
-- response-content safeguards beyond citation validation;
-- bounded post-result follow-up questions;
-- clinical review of source policy and emergency rules;
-- persistence, accounts, customer/pet history, RAG/vector storage, deployment, and an ERD.
+**Search had to cope with real-world failures.** One failed query used to throw away the good
+results of the others. Each query now runs on its own, and a search where every query fails is
+repeated once. The queries were also leaning towards illness pages, so at least one must now ask
+whether the sign is normal or worrying.
 
-MLflow is required by the assignment. Tracking of each turn exists; the first item above extends
-it.
+**A browser page was added after all.** The plan ruled it out, but a reviewer can open a browser
+page through a temporary link with nothing installed. The desktop window stayed for local work.
+
+**MLflow was built later than planned, and differently.** It was pushed back during the chain
+rewrite, until a review pointed out it is one of the brief's three requirements. It now saves to
+a local database file instead of plain files, and records a trace of every model call with its
+prompt, reply and timing. Real use then showed several ways tracking could break the chat, such
+as a failed MLflow write turning a good reply into an error. Each was fixed, so tracking can never
+change what the owner sees.
+
+**The question limit moved fully into code.** At the limit, the backend still asked the model once
+more and trusted it to stop. The model asked a fourth question anyway, and **Try again** repeated
+the failure. Now the model isn't asked once the limit is reached.
+
+**Emergencies got their own check on every message.** The follow-up chain had been the second
+line of defence behind the phrase list, but it only saw the owner's words after the three fixed
+questions, and it caught 2 of 7 clear emergencies. A separate chain now asks one yes-or-no
+question on every message, and caught all 7 with no false alarms on ordinary statements.
+
+**The default model changed from llama3 to gpt-oss:20b.** llama3 8B was fast for building and
+testing. gpt-oss:20b gives more accurate answers, but needed changes to how structured replies are
+requested, a lower reasoning setting so its thinking didn't use up the space for its answer, and a
+larger context window: Ollama's small default was silently cutting the rules off long summary
+prompts.
+
+**The summary became stricter.** Pages about illnesses were pushing ordinary cases towards
+"possible problem", so that outcome now needs something abnormal reported by the owner. Repeated
+real chats also led to rejecting empty "nothing flagged" summaries, treating a repeated question as
+"I have enough", and fixing phrase-list false alarms such as "wee" matching inside "week".
+
+**Planned but not built yet:** the CI workflow, a full MLflow analysis command (a short example
+script is in the [MLflow README](../src/mlflow_tracking/README.md#analyse-it)), and grading answers
+with a second model. These are in the root README's [future work](../README.md#future-work).

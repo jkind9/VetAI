@@ -1,29 +1,40 @@
 # Configuration
 
-`approved_sources.toml` is the reviewed machine-readable source allowlist. Its organisations and
-domains must match [`documentation/approved-sources.md`](../documentation/approved-sources.md).
-Source changes are code-review changes: adding a domain expands which external text can influence a
-result.
+## Approved sources
 
-The launched backend reads these non-secret environment values:
+`approved_sources.toml` lists the six websites the search may use. It must match the table in
+[`documentation/approved-sources.md`](../documentation/approved-sources.md), which explains why each
+site is on it. Adding a site changes which outside text can reach the summary, so treat it like a
+code change.
 
-| Variable | Default | Purpose |
+## Environment variables
+
+The backend reads these when it starts. None of them are secret.
+
+| Variable | Default | What it sets |
 | --- | --- | --- |
-| `VETAI_OLLAMA_MODEL` | `gpt-oss:20b` | Installed Ollama model used by all four chains |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Local Ollama server URL |
-| `VETAI_OLLAMA_TIMEOUT_SECONDS` | `60` | Per-model-call timeout |
-| `VETAI_SEARCH_TIMEOUT_SECONDS` | `12` | Overall approved-source search/fetch budget |
-| `VETAI_SEARCH_REGION` | `uk-en` | Search-provider region |
-| `BACKEND_API_URL` | `http://127.0.0.1:8000` | Desktop-only backend URL |
+| `VETAI_OLLAMA_MODEL` | `gpt-oss:20b` | The Ollama model used for all four model steps |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Where Ollama is running |
+| `VETAI_OLLAMA_TIMEOUT_SECONDS` | `60` | How long to wait for one model call |
+| `VETAI_SEARCH_TIMEOUT_SECONDS` | `12` | How long to wait for each search call and each page download |
+| `VETAI_SEARCH_REGION` | `uk-en` | The search region |
+| `MLFLOW_TRACKING_URI` | `sqlite:///mlflow.db` | Where MLflow saves its runs |
+| `BACKEND_API_URL` | `http://127.0.0.1:8000` | Where the desktop window finds the backend (desktop only) |
 
-The backend selects the structured-output transport from the model family: `gpt-oss:*` uses
-function calling with `low` reasoning effort, while other model overrides use Ollama's JSON-schema
-mode and retain their default reasoning setting.
+For example, in PowerShell:
 
-The desktop transfer timeout is longer than one model call because a final request performs query
-generation, search, and synthesis. Individual stages remain bounded and are not automatically
-retried.
+```powershell
+$env:VETAI_OLLAMA_MODEL = "llama3:8b"
+uv run uvicorn backend.app:app --host 127.0.0.1 --port 8000
+```
 
-Machine-specific URLs and any future provider credentials belong in environment variables. Do not
-commit them. Generated queries, owner transcripts, and retrieved excerpts are not configuration and
-must not be written here.
+For any `gpt-oss` model, the backend asks for structured replies through function calling and sets
+the model's reasoning effort to "low". Other models use Ollama's JSON-schema mode and their
+default reasoning. Only `gpt-oss:20b` has been checked end to end.
+
+Both screens stop waiting for a reply after 65 seconds. That is set in the screens' code, not by a
+variable.
+
+Put machine-specific addresses, and any future API keys, in environment variables, never in a
+committed file. What owners type, the generated queries and the page text are data, not
+configuration, and never belong here.

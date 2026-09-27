@@ -1,48 +1,46 @@
 # Frontend
 
-Two clients, one API. Neither imports backend, LangChain, Ollama, search, or MLflow code; both
-speak the same `POST /v1/chat` contract and map the same status codes to the same owner-facing text.
+Two chat screens use the same backend. Neither contains any model, search or MLflow code. Both
+send the same `POST /v1/chat` request and show the same text for each kind of reply.
 
-| Folder | Client | Who it is for |
+| Folder | Screen | Who it is for |
 | --- | --- | --- |
-| [`local/`](local/README.md) | Native PySide6 desktop window | Development on this machine |
-| [`public/`](public/README.md) | Svelte page served by the backend | Anyone given a link, with nothing to install |
+| [`public/`](public/README.md) | A browser page (Svelte), served by the backend | Anyone given a link, with nothing to install |
+| [`local/`](local/README.md) | A desktop window (PySide6) | Working on this machine |
 
-## Why there is a second, browser-based client
+## Why there are two
 
-The desktop client cannot be shared. PySide6 draws to the operating system's window manager, so
-there is no port to forward and no page to hand out — to see it, a person has to install Python,
-`uv`, Qt and Ollama, then pull a multi-gigabyte model, before anything appears on screen. For a
-reviewer who wants to spend ten minutes looking at this project, that is the whole ten minutes.
+The desktop window came first. It can't be shared: to see it, someone has to install Python, uv,
+Qt and Ollama, and download a 13 GB model. The browser page removes all of that. The backend
+serves the page from the same address as the API, so one temporary public link (see the root
+README) lets a reviewer use the demo in a browser while the model runs on the host machine.
 
-The Svelte client removes all of it. The backend serves the built page from the same origin as the
-API, so one Cloudflare tunnel in front of port 8000 is the intended reviewer demo: the visitor opens
-it and the model runs on the machine hosting the backend. They install nothing, configure nothing,
-and pull no model. The static mount and structured assessment rendering are implemented. A browser
-E2E test exercises the production bundle, every question turn, both assessment outcomes, sources,
-suggested actions, and the emergency route against a locally hosted FastAPI process. The root
-README's "Letting someone else use it" section has the tunnel commands.
+Having two screens also shows that the boundary between screen and backend is real: the same
+requests drive a desktop window and a web page, and the backend can't tell them apart.
 
-Two smaller reasons it earns its place. It proves the frontend/backend boundary is real rather than
-asserted — the same JSON contract drives a Qt window and a browser page, and the backend cannot tell
-them apart. And it is the client a hosted deployment would use later, so the option stays open
-without a rewrite.
+The page uses Svelte rather than hand-written HTML and JavaScript because the chat has state to
+keep straight: a pending request, a typed answer that must survive a failed request, and late
+replies from requests the owner has moved on from. Svelte builds to plain static files, so it adds
+a build step but nothing extra at runtime.
 
-Svelte rather than a plain HTML file because the chat has genuine state to keep straight — pending
-turns, a draft answer that must survive a failed request, late replies from abandoned requests — and
-that logic reads better as components with reactive state than as hand-written DOM updates. It costs
-one build step and no runtime dependency: the output is static files.
+## Rules both screens follow
 
-## What each client owns
+Both keep the same things in memory: the species and concern, the accepted questions and answers,
+the answer being typed, whether a request is pending, whether the chat has ended, and the last
+error.
 
-Both hold the same shape of visible state: the current intake, the accepted question-and-answer
-pairs, the draft answer for the question on screen, a pending flag, an ended flag, and the last
-error. The rules they both follow:
+- An answer joins the history only after the backend accepts it.
+- A failed request leaves the typed answer exactly as it was. Retrying is always the owner's
+  choice, with **Try again**.
+- A summary or an emergency notice ends the chat. **New concern** clears everything.
+- A reply that arrives after **New concern**, or after a newer request, is ignored.
+- Text over 1,000 characters must be refused with a message, never cut short, because the cut-off
+  end might contain a warning phrase. The desktop window does this. The browser page doesn't yet:
+  its text boxes stop at 1,000 characters, which silently cuts pasted text (see its README).
+- A `422` shows the backend's message about the field to fix. A `503` or `500` shows the fixed
+  service message, and no reply at all shows a connection or timeout message.
+- When the summary has no sources because the search didn't work, the search notice is shown and
+  the empty citations and "Sources" heading are hidden.
 
-- an answer joins the history only once the backend has accepted it;
-- a failed turn leaves the draft exactly as typed, and retrying is always the owner's action;
-- an assessment or emergency notice ends the chat, and starting over clears everything;
-- a reply from a superseded or abandoned request is dropped by request id.
-
-Every decision about *what* the owner sees next is the backend's: the emergency route, which
-question comes next, and when the conversation ends. Neither client can reach those rules.
+Both screens stop waiting after 65 seconds. Everything about what the owner sees next (emergencies,
+which question comes next, when the chat ends) is decided by the backend.

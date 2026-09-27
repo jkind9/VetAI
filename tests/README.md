@@ -1,81 +1,92 @@
 # Tests
 
-Run with `uv run pytest`. Ordinary tests need no model, network, or visible display. A stage-aware
-fake records emergency-check, adaptive, query, and synthesis calls; a fake searcher supplies
-approved and rejected evidence deterministically.
+```powershell
+uv run pytest            # about 200 tests, under 30 seconds
+uv run ruff check .      # lint
+```
 
-| File | Contract |
-| --- | --- |
-| `test_workflow.py` | The phrase gate followed by the standalone model emergency check on every unmatched turn; three fixed questions; adaptive cap; both assessment outcomes; chain ordering and short-circuiting |
-| `test_questions.py` | Immutable question catalog and phase lookup |
-| `test_search.py` | Query privacy checks, approved hosts, redirects, deduplication, three-results-per-query cap, retained sibling-query results, one bounded total-failure retry, and distinct no-results/no-evidence outcomes |
-| `test_model_output.py` | Emergency/adaptive/query/synthesis structure, removal of adaptive `urgent_escalation`, outcome invariants, and citation-ID grounding failures |
-| `test_scan_scope.py` | Emergency scan reads concern/owner answers only at every phase |
-| `test_safeguards.py` | Curated phrase rules and near misses |
-| `test_api.py` | Structured question/assessment/emergency responses, stable errors, and conditional Svelte static serving |
-| `test_error_contracts.py` | Dedicated public `503`/`500` action-matrix paths, downstream-call boundaries, and no hidden retries |
-| `test_approved_source_smoke.py` | Opt-in live fetch of a known MSD Veterinary Manual page through the production allowlist and page extractor |
-| `test_frontend_state.py` | Desktop chat state: species-and-concern intake, accepted history versus draft, answer bubbles only after success, assessment/emergency end the chat |
-| `test_frontend_window.py` | Offscreen desktop window: bubbles, "Thinking…" while pending, retry of a failed first or later request, assessment sections with a source link, reset |
-| `test_frontend_api.py` | Desktop reply parsing (question, emergency, assessment, malformed bodies), and 422/503 bodies shown even though Qt flags them as network errors |
-| `test_desktop_backend_contract.py` | The desktop's own requests sent to the real backend code, and its parsing of every real reply: question, emergency, assessment, 422, 503 |
-| `test_mlflow_tracking.py` | One MLflow run per turn with its parameters, time and reply kind; failed and rejected turns marked FAILED with their reason; each turn's trace holds its LangChain prompt, reply and timing; overlapping turns keep their own traces; a turn is still answered, untraced, when its run cannot be opened; a failed MLflow write never changes the reply or turns a 422 into a 500; a deleted experiment is restored at startup; 48 turns at once are all answered and recorded |
-| `test_runtime_app.py` / `test_settings.py` | Runtime composition, the model and prompt versions recorded on each MLflow run, and timeout/source configuration |
-| `test_ollama_smoke.py` | Opt-in real-model adaptive question, query, outcome, and suggested-action shapes with fake evidence |
-| `test_emergency_check_live.py` | Opt-in direct evaluation of the dedicated emergency chain: all seven emergency cases caught, no false alarms on the ordinary set, and aggregate MLflow metrics |
-| `test_live_customer_journeys.py` | Recorded API journeys through real Ollama: J1 keyword emergency, J2 first-turn dedicated model emergency check, J3 live search plus generated assessment, and J4 all-normal negative control |
-| `../src/frontend/public/e2e/full-process.spec.js` | Production Svelte bundle through hosted FastAPI: adaptive cap, both outcomes, sources/actions, phrase/dedicated-model emergency routes, and retryable failure |
+The ordinary tests need no Ollama, no internet and no screen. They swap in stand-ins, defined in
+`conftest.py`:
 
-Case IDs and human-review rules live in
+- `FakeChains` replaces the four model steps. Each test scripts exactly what the "model" replies,
+  and the fake records which steps were called, so a test can check that nothing ran after an
+  emergency.
+- `FakeSearcher` replaces the web search with fixed pages, or with a chosen failure.
+
+Any MLflow runs the tests make go to a throwaway database, never the project's `mlflow.db`. The
+top of `conftest.py` sets `MLFLOW_TRACKING_URI` before anything imports `backend.app`, because
+importing it starts tracking.
+
+The example conversations these tests check, with their case IDs (S1, A6, J3 and so on), are in
 [`documentation/test-cases.md`](../documentation/test-cases.md).
 
-External search is always faked in normal CI. The opt-in live customer journeys run a fixed
-live-search scenario set separately and record provider/model versions, sources, latency, failures,
-and human review.
+## What each file checks
 
-```powershell
-$env:VETAI_RUN_OLLAMA_SMOKE = "1"
-$env:VETAI_OLLAMA_MODEL = "gpt-oss:20b"
-uv run pytest tests/test_ollama_smoke.py -v -s
-```
+**The conversation**
 
-Every MLflow run the tests make goes to a throwaway database, never the project's `mlflow.db`. The
-top of `conftest.py` sets `MLFLOW_TRACKING_URI` before any test imports `backend.app`, which starts
-tracking as it is imported. The browser E2E server (`e2e_backend.py`) does the same.
+| File | What it checks |
+| --- | --- |
+| `test_workflow.py` | The order of steps; both emergency checks on every message; the three standard questions; the follow-up count and limit; the repeat rule; that a failed step stops the steps after it |
+| `test_questions.py` | The three standard questions, and which one comes next |
+| `test_safeguards.py` | Each emergency phrase rule, and ordinary sentences that must not match, such as "maybe a week" |
+| `test_scan_scope.py` | The phrase list reads only the owner's words, never the app's questions, search results or model output |
+| `test_search.py` | Query checks, approved-site checks, redirects, duplicates, partial failures, the retry waits and 20-second limit, and "no results" versus "no usable pages" |
+| `test_model_output.py` | The shape each model step must reply in, the outcome rules, and citations to pages that weren't read |
+| `test_model_adapter.py` | Building the model from settings, and the two gpt-oss reply quirks the adapter handles |
+| `test_j3_regression.py` | Rules in the prompt files that past real chats showed were needed, such as the normal-or-worrying search query and general guidance when no pages are found |
 
-The dedicated emergency-check quality evaluation is also opt-in. It calls the real configured
-model directly for seven clear emergencies and seven ordinary statements, then records aggregate
-MLflow metrics:
+**The API and the app**
 
-All opt-in model suites construct the adapter through the same settings-aware factory as the
-launched backend, including model-family structured-output and reasoning settings.
+| File | What it checks |
+| --- | --- |
+| `test_api.py` | Successful question, summary and emergency replies, `422` replies, and serving the built browser page |
+| `test_error_contracts.py` | Every `503` and `500` case, that no model step is retried, and that a failed search still gives a summary with a notice |
+| `test_mlflow_tracking.py` | One run per message with its parameters, timing and reply kind; failure tags; traces; overlapping turns; MLflow failures that must not change the reply; restoring a deleted experiment; 48 turns at once; the database location |
+| `test_runtime_app.py`, `test_settings.py` | Starting the real app from settings, the model and prompt versions recorded on each run, and the environment variables |
+| `test_launch.py` | The README's command for the desktop window finds the installed package |
 
-```powershell
-$env:VETAI_RUN_EMERGENCY_CHECK_LIVE = "1"
-uv run pytest tests/test_emergency_check_live.py -v -s
-```
+**The desktop window**
 
-The live approved-source check is separate from ordinary deterministic CI:
+| File | What it checks |
+| --- | --- |
+| `test_frontend_state.py` | The window's chat state: the form, accepted history versus the answer being typed, and the chat ending |
+| `test_frontend_window.py` | The window itself, drawn off-screen: bubbles, "Thinking…", **Try again** (including after a failed first message), summaries with links, refusing over-long text, **New concern** |
+| `test_frontend_api.py` | Reading each kind of reply, and showing the backend's message for `422` and `503` |
+| `test_desktop_backend_contract.py` | The desktop's real requests sent to the real backend code, so the two can't drift apart |
 
-```powershell
-$env:VETAI_RUN_LIVE_SEARCH_SMOKE = "1"
-uv run pytest tests/test_approved_source_smoke.py -v
-```
+**The browser page**
 
-The browser E2E suite also stays separate from `pytest` because it builds the Svelte client and
-launches Edge:
+`src/frontend/public/e2e/full-process.spec.js` builds the page, starts a real backend with the
+stand-in model and fake search, and drives Microsoft Edge through six whole chats: a "possible
+problem" summary, a "nothing flagged" summary, a failed search that still gives a summary with a
+notice, a phrase-list emergency, a misspelled emergency caught by the model check, and a failed
+step followed by **Try again**. It runs separately, because it needs Node:
 
 ```powershell
 cd src/frontend/public
 npm run test:e2e
 ```
 
-The real customer journeys are intentionally opt-in. They call the installed Ollama model and live
-approved-source search, repeat J2/J3 three times, and write untracked JSON evidence to
-`artifacts/live-journeys/`. A J3 artifact is not reviewer sign-off until its required human-review
-checks are completed:
+## Tests that use the real model or the internet
+
+These are skipped unless switched on with an environment variable, because they depend on Ollama,
+a network connection, or outside websites.
+
+| File | Switch | What it checks |
+| --- | --- | --- |
+| `test_ollama_smoke.py` | `VETAI_RUN_OLLAMA_SMOKE=1` | The real model returns a valid reply for each model step, using fake pages |
+| `test_emergency_check_live.py` | `VETAI_RUN_EMERGENCY_CHECK_LIVE=1` | The real emergency check on 7 clear emergencies and 7 ordinary statements: all 7 caught and no false alarms. Records the result in MLflow |
+| `test_approved_source_smoke.py` | `VETAI_RUN_LIVE_SEARCH_SMOKE=1` | Downloads one known approved page through the real search code |
+| `test_live_customer_journeys.py` | `VETAI_RUN_LIVE_E2E=1` | Whole chats (J1 to J4) with the real model and live search. Saves a JSON record of each under `artifacts/live-journeys/` for a person to review |
+
+For example:
 
 ```powershell
-$env:VETAI_RUN_LIVE_E2E = "1"
-uv run pytest tests/test_live_customer_journeys.py -v -s
+$env:VETAI_RUN_OLLAMA_SMOKE = "1"
+uv run pytest tests/test_ollama_smoke.py -v -s
 ```
+
+These all build the model with the same settings as the running app, including the gpt-oss
+settings. Set `VETAI_OLLAMA_MODEL` to try another model. `live_journey_checks.py` holds the rules
+the J1 to J4 chats are checked against, and `test_live_journey_checks.py` tests those rules
+without the model.

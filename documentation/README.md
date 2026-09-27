@@ -1,13 +1,13 @@
 # Design documents
 
-- [Implementation plan](implementation-plan.md): ordered multi-chain flow, the per-turn emergency
-  check inside the question loop, architecture, privacy boundaries, and deferred milestones.
-- [Failure handling](failure-handling.md): complete error-to-action, retry, fallback, and desktop-state contract.
-- [Approved sources](approved-sources.md): reviewed organisations, domains, enforcement, and evidence rules.
-- [Test cases](test-cases.md): synthetic cases for standard questions, the standalone model
-  emergency check, adaptive questions, retrieval, synthesis, safeguards, and failures.
-- [Technical-test brief](../e071501d-5c3c-4368-9565-a0ba2b94ce0c_Tech_Test.pdf): original assignment.
+- [Implementation plan](implementation-plan.md): the plan as first written, and how the plan and
+  the build changed over the following days, with the reasons.
+- [Approved sources](approved-sources.md): the six vet organisations search may use, why each was
+  chosen, and how the list is enforced.
+- [Test cases](test-cases.md): example conversations and what counts as an acceptable reply,
+  including the real-model test chats.
+- [Technical-test brief](../e071501d-5c3c-4368-9565-a0ba2b94ce0c_Tech_Test.pdf): the original
+  assignment.
 
-The current milestone adds bounded live retrieval but not a vector database or stored RAG corpus.
-Each chat turn is recorded in MLflow (see `src/mlflow_tracking`). It continues to defer customer
-records, Postgres, an ERD, post-result chat, and production evaluation.
+What happens when something fails is listed once, in the
+[backend README](../src/backend/README.md#when-something-fails).

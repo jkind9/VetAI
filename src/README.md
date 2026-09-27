@@ -1,18 +1,14 @@
-# Source layout
+# Source code
 
-The [backend](backend/README.md) owns validation, the emergency-first workflow, the deterministic
-question prefix, four LangChain/Ollama stages, approved-source retrieval, grounding, and HTTP
-composition. Uvicorn launches `backend.app:app`.
+| Folder | What it is |
+| --- | --- |
+| [`backend/`](backend/README.md) | The FastAPI app: the conversation rules, the emergency checks, the four model steps, web search, and the error replies |
+| [`mlflow_tracking/`](mlflow_tracking/README.md) | Records every chat message as an MLflow run, with a trace of each model call |
+| [`frontend/`](frontend/README.md) | The two chat screens: a browser page (Svelte) and a desktop window (PySide6) |
 
-The [frontend](frontend/README.md) is two clients over one API: a native PySide6 desktop window in
-`frontend/local` for work on this machine, and a Svelte page in `frontend/public` that the backend
-serves so anyone given a link can use the demo with nothing installed. Each client owns in-memory
-conversation state, separate owner/VetAI bubbles, pending/error states, and asynchronous HTTP.
-Neither imports any backend, model, or search package.
+The screens only talk to the backend over HTTP (`POST /v1/chat`). Neither contains any model,
+search or MLflow code, and the backend can't tell which screen it is talking to.
 
-The [MLflow tracking](mlflow_tracking/README.md) package records every chat turn as an MLflow run,
-with the turn's LangChain calls traced inside it. All MLflow code lives there.
-
-The backend keeps no session between turns. Each turn's record, including owner text, is stored on
-this machine in MLflow's `mlflow.db`, which git ignores. External search sees generated queries
-only; the raw transcript stays local.
+The backend keeps nothing between messages: each screen sends the whole chat every time. The only
+thing saved is the MLflow record in `mlflow.db`, which stays on this machine and holds what the
+owner typed. The web search only ever sees the short generated queries, never the chat.

@@ -26,6 +26,8 @@ __pycache__/
 Thumbs.db
 
 # Scratch space used while building; not part of the deliverable
+opus_review.md
+documentation/reviewer-readiness-task.md
 tmp/
 task_list/
 graphify-out/

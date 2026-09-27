@@ -1,306 +1,294 @@
-# Backend core
+# Backend
 
-This folder owns the ordered conversation, emergency routing, four LangChain/Ollama stages,
-approved-source retrieval, grounding validation, and HTTP composition. Each turn is recorded in
-MLflow by the separate [`../mlflow_tracking/`](../mlflow_tracking/README.md) package, which the chat
-route in `app.py` calls.
+The backend is a FastAPI app with one chat endpoint, `POST /v1/chat`. Each time the owner sends
+a message, the browser page or desktop window posts the whole chat so far. The backend checks it,
+works out what comes next, and replies with one of three things:
 
-| File | Owns |
+- a **question** for the owner to answer;
+- an **emergency notice**, which ends the chat;
+- an **assessment**, the final summary with sources, which also ends the chat.
+
+The backend keeps nothing between messages. Every message is recorded as one MLflow run by the
+separate [`../mlflow_tracking/`](../mlflow_tracking/README.md) package.
+
+| File | What it does |
 | --- | --- |
-| `questions.py` | Immutable three-question catalog and standard-stage lookup |
-| `workflow.py` | Phase inference, emergency-first ordering, caps, orchestration, citation validation |
-| `safeguards.py` | Curated warning-phrase matcher; imports nothing from the project |
-| `schemas.py` | Request, chain output, evidence, assessment, result, limits, and error types |
-| `model.py` | Four structured-output LangChain chains backed by one Ollama model, plus prompt loading |
-| `approved_sources.py` | Source catalog loading and exact host/subdomain checks |
-| `search.py` | Query privacy validation, web search, result filtering, bounded extraction |
-| `app.py` | FastAPI routes, runtime dependency composition, MLflow wrapping, and optional browser-client hosting |
-| `error_handling.py` | Stable public `422`, `503`, and `500` responses |
-| `settings.py` | Environment-backed model, search, and timeout settings |
+| `app.py` | Builds the FastAPI app, wires in the model and search, and serves the built browser page |
+| `workflow.py` | `run_turn`: decides what happens next for one message, and checks the summary's citations |
+| `safeguards.py` | The fixed list of emergency warning phrases. Imports nothing else from the project |
+| `questions.py` | The three standard questions |
+| `model.py` | The four LangChain chains, all using one Ollama model, and prompt-file loading |
+| `search.py` | Checks the search queries, searches the web, and downloads and trims approved pages |
+| `approved_sources.py` | Loads the approved-site list and checks whether a web address is on it |
+| `schemas.py` | The shape and size limits of every request, model reply, and response (Pydantic) |
+| `error_handling.py` | Turns failures into the fixed `422`, `503` and `500` replies |
+| `settings.py` | Reads the model name, Ollama address, timeouts and search region from the environment |
 
-Three important inputs live outside this folder:
+It also reads two things from outside this folder: the prompt files in
+[`../../prompts/`](../../prompts/README.md) and the approved-site list in
+[`../../config/approved_sources.toml`](../../config/approved_sources.toml).
 
-- `../../prompts/*.md` contains the versioned system and human templates loaded by `model.py`;
-- `../../config/approved_sources.toml` is the machine-readable retrieval allowlist;
-- `../mlflow_tracking/` wraps each `/v1/chat` call in one run and trace.
+## How one message is handled
 
-## Ordered flow
+The diagram in the [root README](../../README.md#what-happens-in-a-chat) shows this flow.
+`run_turn` in `workflow.py` goes through these steps in order. It stops at the first step that
+produces a reply.
 
-```mermaid
-flowchart TD
-    subgraph questions["1. Question loop"]
-        request["Owner sends concern or answers one question"]
-        safety["Phrase gate; if clear, run standalone model emergency check"]
-        phase{"Completed question/answer pairs"}
-        fixed["0-2: return next fixed question"]
-        adaptive["Adaptive chain: pair 3 must ask; pairs 4-5 ask or ready"]
-        answer["Owner answers in a new POST /v1/chat"]
+1. **Check the chat history.** Reject it with a `422` if it is out of order (see
+   [Working out where the chat is](#working-out-where-the-chat-is)).
+2. **Emergency phrases.** `safeguards.find_emergency` looks for fixed warning phrases in the
+   owner's own words: the concern and every answer. It never reads the app's questions, search
+   results, or model output. A match returns the emergency notice.
+3. **Model emergency check.** The emergency-check chain answers one yes-or-no question: could the
+   signs the owner reported need an emergency vet now? It catches what the phrase list misses,
+   such as a pet's name ("Max collapsed"), a misspelling, or a sign the list doesn't name. It is
+   told to say yes when unsure. Yes returns the same emergency notice. If this step fails, the
+   turn fails with a `503`; it is never treated as "no emergency".
+4. **Standard questions.** If fewer than three have been answered, return the next one from
+   `questions.py`.
+5. **Follow-up questions.** Ask the follow-up chain for the next question, unless three
+   follow-ups have already been answered.
+6. **Search queries.** The query chain writes one to three short search queries.
+7. **Web search.** `search.py` searches the approved sites and keeps up to four usable pages.
+8. **Summary.** The summary chain writes the assessment from those pages. `_ground_assessment`
+   then checks every citation and builds the final reply. If the search found no usable pages,
+   the summary is written from general guidance alone and the reply carries a notice saying so.
 
-        request --> safety
-        safety -->|no emergency| phase
-        phase --> fixed
-        phase --> adaptive
-        fixed --> answer
-        adaptive -->|ask| answer
-        answer --> request
-    end
+Steps 2 and 3 run on every message, so the emergency checks see the first concern and every
+answer, including the last one before search. Either check can raise an emergency; nothing later
+can cancel one. Both lead to the same fixed notice, so the model never writes its wording.
 
-    subgraph searching["2. Search chain"]
-        query["Generate search queries"]
-        search["Approved-source search and extraction"]
-        evidence["Validated evidence"]
-        query --> search --> evidence
-    end
+## Working out where the chat is
 
-    subgraph summary["3. Summary + recommendations"]
-        synthesis["Evidence-synthesis chain"]
-        assessment["Grounded owner-visible result"]
-        synthesis --> assessment
-    end
+Because nothing is stored between messages, the backend counts the question-and-answer pairs in
+the history it is sent:
 
-    emergency_notice["Fixed emergency notice; end"]
+| Pairs already answered | What happens next |
+| --- | --- |
+| 0 to 2 | The next standard question |
+| 3 | The first follow-up question. The model must ask one |
+| 4 or 5 | The model asks another follow-up, or says it has enough and search starts |
+| 6 | Search starts. The model is not asked, so it can't add a fourth follow-up |
 
-    safety -->|emergency| emergency_notice
-    adaptive -->|ready| query
-    phase -->|6: adaptive cap reached| query
-    evidence --> synthesis
-```
+The history must alternate app question then owner answer, end with an owner answer, and hold at
+most 12 messages. The first three questions must match the standard questions word for word.
+Nothing else is checked, so a custom client could change the follow-up questions. That is a known
+limit of keeping no memory on the server.
 
-A **completed pair** means two adjacent history messages: an assistant question followed by the
-owner's answer. Each request returns at most one question; the backend does not loop internally.
-The client sends the answer in a new request, which starts again at the two emergency checks. Pairs
-zero to two select the next fixed question. Pair three requires the first adaptive question; pairs
-four and five allow the adaptive chain to ask or declare readiness; pair six goes directly to
-search without another adaptive call. Failure exits are omitted from this overview: a required
-model or search stage that fails ends the request with the shared `503` contract.
+If the model repeats a question that was already asked, the backend treats it as "I have enough"
+and starts search. A repeat is the same words ignoring capitals, or two questions that both ask
+about the pet's age ("age" or "how old"), which the model tended to ask twice in different words. On the first follow-up that isn't allowed,
+so the turn fails with a `503` instead.
 
-Every turn starts with the phrase gate; every turn that survives it then runs the model check before
-anything else happens:
+## The four model steps
 
-1. **The phrase gate** (`safeguards.py`): plain Python, no model. It scans only the concern and
-   owner answers; assistant wording, search queries, retrieved content, and model output are
-   excluded. A match ends the turn at once.
-2. **The emergency-check chain**: one model call whose only job is to decide whether the
-   owner-reported signs may need an emergency vet now. It runs on every unmatched turn from the
-   first message, so it sees the concern before the first fixed question and the last answer before
-   search. It catches what the phrase list misses: pet names ("Max collapsed"), contractions,
-   misspellings, and signs the list does not name. When unsure it answers yes.
-
-Both routes return the same application-owned notice, and neither can be lowered by another stage.
-The follow-up question chain cannot raise an emergency; that is the check's job alone. Search never
-decides an emergency. A failed check is a `503`, never a pass: a turn does not continue without its
-emergency check.
-
-## Phase inference and history
-
-The backend stores no session. The client resends the complete accepted history on every turn, and
-the backend infers the phase from zero to six completed question/answer pairs:
-
-- pairs 1–3 are the fixed duration, previous-occurrence, and pattern questions; their assistant
-  text must exactly match `STANDARD_QUESTIONS` in `questions.py`;
-- pairs 4–6 are model-generated adaptive questions;
-- pair 4—the first adaptive question and answer—is mandatory before search can start;
-- after adaptive pairs 1 and 2, the adaptive chain may ask another question or return
-  `ready_for_search`;
-- after adaptive pair 3, the workflow goes straight to search without calling the adaptive chain.
-  The code counts the follow-up questions, so the model is never asked for a fourth one. The phrase
-  matcher still checks the third answer first.
-
-History must alternate assistant then owner, end in an owner answer, stay within 12 messages, and
-use non-blank bounded text. Requiring the exact standard prefix prevents accidental client drift,
-but a stateless custom client can still alter later history.
-
-## Chain boundaries
-
-`model.py` exposes four methods over one configured local Ollama model:
+`model.py` builds one `ChatOllama` model and four chains from it. The workflow calls them as:
 
 ```python
-chains.check_for_emergency(turn)
-chains.propose_adaptive_question(turn, mode)
-chains.generate_search_plan(turn)
-chains.synthesise_assessment(turn, evidence)
+chains.check_for_emergency(turn)               # -> EmergencyCheck(emergency: bool)
+chains.propose_adaptive_question(turn, mode)   # -> AdaptiveDecision: a question, or ready
+chains.generate_search_plan(turn)              # -> SearchPlan: 1 to 3 queries
+chains.synthesise_assessment(turn, evidence)   # -> AssessmentDraft
 ```
 
-Runtime composition uses function calling for `gpt-oss:*`, including the default `gpt-oss:20b`,
-because Ollama returns that family's structured results as tool calls. Other configured models keep
-the JSON-schema structured-output method. If gpt-oss ignores a forced tool and writes schema JSON
-in message content, the adapter validates that content against the same Pydantic model; malformed
-or schema-invalid content still fails closed. If gpt-oss uses the known semantic labels `area`,
-`action`, and `question` inside an otherwise valid assessment tool call, the adapter maps those
-three labels to the shared `text` field and reruns the complete strict schema. No other field is
-repaired. The gpt-oss reasoning effort is set to `low` so the 900-token generation bound remains
-available for the typed answer; other models keep their default reasoning setting.
+Each chain is `prompt | model.with_structured_output(schema)`, so the model must reply in the
+shape of a Pydantic class from `schemas.py`. A reply that doesn't fit is rejected and never shown.
+`mode` tells the follow-up chain whether it may say it has enough: `question_required` for the
+first follow-up, `question_or_ready` after that.
 
-The emergency-check chain returns `EmergencyCheck(emergency: bool)` and nothing else on every turn
-not ended by the phrase gate. The adaptive chain asks one question or indicates readiness. The first
-call uses `question_required` and the next two use `question_or_ready`. Both modes permit a question;
-only `question_or_ready` permits readiness. After the required first adaptive answer, an exact
-case-insensitive repeat of an answered question is treated as readiness and proceeds to search; the
-application does not show the repeat or invent a replacement. There is no adaptive call at the cap.
-The query chain sees the answered history and returns one to three neutral queries. At
-least one query must explicitly compare whether the main sign is normal/expected versus
-concerning/abnormal. The synthesis chain runs after retrieval and receives bounded, untrusted
-evidence blocks identified by source ID.
+**gpt-oss specifics.** Ollama returns gpt-oss's structured replies as function calls, so the
+backend uses LangChain's `function_calling` method for any `gpt-oss:*` model and `json_schema`
+for other models. Two gpt-oss quirks are handled in `model.py`:
 
-All four prompt files use `<!-- system -->` and `<!-- human -->` markers. `PromptFile.load` splits
-on those markers, and `app.py` records each file's SHA-256 on every MLflow run. That makes the exact
-prompt version used for a result inspectable without copying prompt text into configuration.
+- when it writes the JSON in its message text instead of a function call, that text is checked
+  against the same Pydantic class;
+- when it names the summary's item field `area`, `action` or `question` instead of `text`, those
+  three names are mapped to `text` and the reply is checked again. No other field is repaired.
 
-Retrieved pages are background references, not evidence that the animal has a condition. The
-synthesis prompt requires a positive abnormal fact reported by the owner before it can choose
-`possible_problem`, so pathology-oriented results alone cannot set the outcome. Both outcomes,
-including `nothing_flagged`, must still contain at least one source-backed suggested action and one
-source-backed question for the veterinarian.
+Its reasoning effort is set to "low", because its thinking and its answer share the same
+900-token output limit.
 
-The synthesis draft chooses only `possible_problem` or `nothing_flagged`. The workflow supplies the
-owner-visible wording, requires possible areas only for `possible_problem`, validates citations for
-all possible areas, suggested actions, and veterinarian questions, and resolves source metadata.
-Suggested actions may include recording an episode or a low-risk practical step only when the
-retrieved evidence supports it.
+The model's context window (how much text it reads at once) is set to 16,384 tokens
+(`CONTEXT_WINDOW_TOKENS`). Ollama's default of about 2,000 tokens silently dropped the start of
+long summary prompts, which removed the rules and the owner's report and caused empty or made-up
+replies. The longest summary prompt is about 12,000 tokens.
 
-There is no automatic model retry. Provider parsing errors raised inside LangChain are classified
-as invalid model output and returned as the shared service failure. The stage and reason are kept
-internally: they go to the server log and onto the turn's MLflow run as the `failed_stage` and
-`failure_reason` tags.
+**What the summary may and may not write.** The summary chain chooses the outcome,
+`possible_problem` or `nothing_flagged`, and writes:
 
-## Approved-source retrieval
+- points a vet may consider (0 to 3, only for `possible_problem`);
+- suggested actions (1 to 4);
+- questions for the vet (1 to 3).
 
-The current search path is deliberately layered. The provider-side `site:` filter narrows results,
-but only the local URL checks enforce the policy:
+When pages were found, every item cites 1 to 4 of them by ID (`S1`, `S2` and so on). The model may
+also add widely accepted general vet guidance that fits the owner's report and doesn't contradict
+the pages, still citing the most relevant page. When no pages were found, every item has an empty
+citation list and the reply's `search_notice` field says "The source search did not work, so this
+result is based on general guidance and has no linked sources." The prompt tells the model to choose
+`possible_problem` only when the owner reported something abnormal: a web page about an illness
+is not enough. The model does not write the recap of what the owner said, the outcome wording, the
+disclaimer, or any links. The workflow adds all of those, and builds the source list from the page
+IDs that were actually cited.
 
-1. `generate_search_plan` returns one to three generated queries, each 3–120 characters. The model
-   sees the species, concern, and answered history; the search adapter receives only the resulting
-   `SearchPlan`, never the raw transcript.
-2. Before network access, `query_is_safe` rejects URLs, email addresses, and phone-like values.
-   The prompt also forbids names, addresses, quoted text, commands, and model-generated `site:`
-   operators. This is data minimisation, not guaranteed anonymisation: the deterministic checker is
-   intentionally limited to the three pattern types implemented in `search.py`.
-3. The adapter prepends a parenthesised `OR` of every approved domain as `site:` terms. It then
-   makes one `ddgs` call per generated query using the configured region, moderate safe search, and
-   at most three raw results per query. The application adds these `site:` terms; the model does not.
-4. Successful sibling-query results are kept if another query raises. The whole unchanged plan is
-   repeated once, after 0.25 seconds, only when **every** provider call raised. If any call completed
-   but the combined result list is empty, the outcome is `no_search_results` and there is no repeat.
-5. Every raw candidate is checked locally. It must be HTTPS and its host must equal an approved
-   domain or be a real subdomain; lookalike suffixes and credential-bearing URLs fail. Candidate
-   URLs are canonicalised and deduplicated before fetch. Search-result snippets are not evidence.
-6. `HttpPageFetcher` checks the allowlist before the first request and before every redirect, follows
-   at most three redirects, accepts only text/HTML, rejects pages over 500,000 bytes, removes
-   script/style/navigation/form-like content, compacts whitespace, and keeps at most 4,000
-   characters. A fetch or parse failure discards only that candidate.
-7. The adapter keeps the first four usable pages and assigns `S1`, `S2`, and so on in accepted
-   order. A missing result title falls back to the final URL path or the approved organisation.
-   Zero raw results produces `no_search_results`; raw results but zero usable pages produces
-   `insufficient_evidence`.
-8. The synthesis model cites these IDs, not URLs. `workflow.py` rejects unknown IDs, then resolves
-   accepted IDs back to the retrieved title, organisation, and URL. Only referenced sources are
-   returned to the client.
+**Prompt versions.** Each prompt file has `<!-- system -->` and `<!-- human -->` sections.
+`PromptFile.load` splits them and takes a SHA-256 fingerprint of the file, and every MLflow run
+records the four fingerprints. So you can tell which prompt text produced which result.
 
-See [`../../documentation/approved-sources.md`](../../documentation/approved-sources.md) for the
-source policy and privacy boundary.
+## Web search
 
-## Limits at a glance
+The model never sees the search engine, and the search engine never sees the chat.
 
-| Boundary | Current limit | Enforced in |
+1. **Check the queries.** `query_is_safe` rejects any query containing a web address, an email
+   address, or something that looks like a phone number, before anything is sent.
+2. **Search.** Each query is sent to DuckDuckGo (through the `ddgs` package) with a `site:`
+   filter for the six approved sites, the configured region (UK by default), and moderate safe
+   search. At most three results are kept per query.
+3. **Keep partial results, and retry a total failure.** If one query fails but another returns
+   results, those results are kept. If every query fails, the same queries are sent again after
+   1, then 2, then 4 seconds (up to four attempts). A new attempt starts only if, judging by how
+   long the last one took, it should finish within 20 seconds of search time. That leaves room for
+   the summary inside the screens' 65-second limit. This is
+   the only automatic retry in the backend.
+4. **Check each result.** A result is kept only if it uses HTTPS and its host is an approved site
+   or a subdomain of one. `aspca.org.example.com` does not count as `aspca.org`. Duplicate
+   addresses are dropped. The search engine's `site:` filter is not trusted on its own.
+5. **Download the page.** `HttpPageFetcher` checks the site list again before every redirect,
+   follows at most three, accepts only HTML or text under 500,000 bytes, removes scripts, styles,
+   navigation and forms, and keeps the first 4,000 characters. A page that fails is skipped, and so
+   is a result with a title over 300 characters.
+6. **Number the pages.** The first four usable pages become `S1` to `S4`. Page text is treated as
+   untrusted: instructions inside a page can't change the rules.
+
+Only the short generated queries leave the machine. Search services and the approved sites can
+still see those queries, the pages requested, and the machine's public IP address.
+[`../../documentation/approved-sources.md`](../../documentation/approved-sources.md) explains why
+each site was chosen.
+
+## Limits
+
+| What | Limit | Set in |
 | --- | ---: | --- |
-| Emergency checks | phrase gate every turn; one model check if the gate does not match | `safeguards.py`, `workflow.py` |
-| Standard questions | exactly 3 before adaptive questioning | `questions.py`, `workflow.py` |
-| Adaptive questions answered | minimum 1, maximum 3 before search | `workflow.py`, `schemas.py` |
-| Complete history | maximum 6 pairs / 12 messages | `schemas.py` |
-| Concern or history message | 1,000 characters | `schemas.py` |
-| Generated adaptive question | 500 characters | `schemas.py` |
-| Search plan | 1–3 queries; 3–120 characters each | `schemas.py` |
-| Raw search results | at most 3 per query | `search.py` |
-| Provider attempts | 2 plan attempts, only after total provider failure | `search.py` |
-| Redirects / fetched page / excerpt | 3 / 500,000 bytes / 4,000 characters | `search.py` |
-| Evidence sent to synthesis | at most 4 accepted pages | `search.py` |
-| Possible areas / actions / vet questions | 0–3 / 1–4 / 1–3 | `schemas.py` |
-| Citations on each grounded item | 1–4 source IDs | `schemas.py` |
+| Standard questions | exactly 3 | `questions.py` |
+| Follow-up questions | at least 1, at most 3 | `workflow.py`, `schemas.py` |
+| Chat history | at most 12 messages (6 question-and-answer pairs) | `schemas.py` |
+| Concern or answer | 1,000 characters | `schemas.py` |
+| A follow-up question | 500 characters | `schemas.py` |
+| Search queries | 1 to 3, each 3 to 120 characters | `schemas.py` |
+| Search results kept per query | 3 | `search.py` |
+| Search attempts | up to 4, after waits of 1, 2 and 4 seconds, only while every query fails, and only if expected to finish within 20 seconds | `search.py` |
+| Redirects, page size, text kept per page | 3, 500,000 bytes, 4,000 characters | `search.py` |
+| Pages sent to the summary | 4 | `search.py` |
+| Page title | 300 characters | `schemas.py` |
+| Model output per call | 900 tokens | `model.py` |
+| Model context window | 16,384 tokens | `model.py` |
+| Model call timeout | 60 seconds (`VETAI_OLLAMA_TIMEOUT_SECONDS`) | `settings.py` |
+| Each search call and each page download | 12 seconds (`VETAI_SEARCH_TIMEOUT_SECONDS`) | `settings.py` |
 
-## Error type → action matrix
+## When something fails
 
-| Error or outcome | Backend action | Owner-visible action | Automatic retry? | Default response / alternative wording? |
-| --- | --- | --- | --- | --- |
-| Invalid/missing intake | Stop before workflow/model/search | `422`, correct field | No | Field correction only |
-| Blank/overlong answer | Stop at request validation | `422`, edit answer | No | Field correction only |
-| Odd/out-of-order/over-limit history | Raise `InvalidTurnRequest` | `422`, correct/restart history | No | Stable history message |
-| Wrong standard-question prefix | Reject altered/skipped phase | `422`, correct/restart history | No | No inferred replacement |
-| Emergency phrase in owner text | Return fixed notice; skip all later work | `200 emergency_notice`; end | No | Fixed application text |
-| Emergency-check chain answers true | Return the same fixed notice; skip every later stage | `200 emergency_notice`; end | No | Model supplies no owner-visible wording |
-| Emergency-check chain fails, times out, or returns malformed output | Raise `ModelOutputError` with stage `emergency_check`; never treat it as "no emergency" | Same `503`, preserve draft, **Try again** | No | No question is shown without a completed check |
-| Standard-question stage | Return next catalog item, after both emergency checks | `200 question` | N/A | Exact deterministic wording |
-| Required first adaptive call says ready | Raise `ModelOutputError(invalid_model_output)` | `503`, preserve draft, **Try again** | No | No substitute question |
-| Malformed/blank/overlong adaptive output | Reject it | Same `503` | No | Raw output hidden |
-| Later adaptive call exactly repeats an answered question | Treat the completed history as ready and continue to search | Continue to search | No | No repeated or substitute question shown |
-| Model timeout | Raise `ModelOutputError(timeout)` | Same `503` | No | No default question/assessment |
-| Ollama connection failure | Raise `ModelOutputError(connection)` | Same `503` | No | No alternate provider |
-| Other provider failure | Raise `ModelOutputError(model_call_failed)` | Same `503` | No | No automatic rephrasing |
-| Three adaptive answers complete | Go straight to search; the adaptive chain is not called | Continue to search | No | No fourth question can be requested |
-| Invalid/unsafe search plan | Reject before external call when possible | `503`, preserve draft | No | Transcript is never used as fallback query |
-| One query fails but another returns raw results | Keep raw results and continue allowlist/fetch validation | Continue if approved evidence remains | No additional retry | No unsourced response |
-| Every provider call fails | Repeat the exact plan once; then raise `ModelOutputError(search_failed)` if it fails again | Same `503` | One bounded repeat only | No rephrasing, provider swap, or unsourced response |
-| At least one provider call completes but the plan returns no raw results, including when a sibling call fails | Raise `ModelOutputError(no_search_results)` | Same `503` | No | No unsourced response |
-| HTTP/off-list/malformed/redirected result | Discard result | No direct message if other evidence works | No | Never sent to synthesis |
-| Individual approved fetch/parse failure | Discard page | Continue only with remaining evidence | No | No second search |
-| Raw results but no approved evidence | Skip synthesis; raise `insufficient_evidence` | `503`, preserve draft | No | No model-only causes |
-| Malformed synthesis | Reject it | `503`, preserve draft | No | No partial assessment |
-| Unknown source ID, contradictory outcome, or uncited grounded item | Reject grounding | Same `503` | No | No invented citation or model-authored outcome wording |
-| Synthesis timeout/provider failure | Stop turn | Same `503` | No | No partial/default assessment |
-| Unexpected exception | Log stage/reason, return safe body | `500`, preserve draft | No | No diagnostics exposed |
-| Successful question | Return and commit only at client on success | Show assistant bubble | N/A | No extra text |
-| Successful assessment | Build the labelled owner recap from owner-authored input, resolve sources, add fixed outcome wording and disclaimer, end | Show structured result + **New concern** | N/A | Synthesis cannot author the recap; retrieved sources only |
+This is the one place the error behaviour is written down.
 
-**Retry means another application-level search invocation.** After a total provider failure, the
-search adapter performs one bounded repeat of the exact same plan. The configured `ddgs` client's
-`auto` mode may also try multiple engines internally during either invocation. Filtering returned
-results or keeping successful sibling-query results is not a retry. The backend makes no hidden
-corrective model call, rephrasing call, or provider swap. A technical failure never triggers
-model-authored reassurance, a diagnosis, or a fabricated source. Any later retry is an explicit
-owner action in a client.
+**The rules:**
 
-The longer narrative version of this contract is
-[`../../documentation/failure-handling.md`](../../documentation/failure-handling.md).
+- Nothing is retried automatically, except a completely failed web search (see
+  [Web search](#web-search)).
+- A failed model step has no fallback answer. A broken model reply is never shown, and the model is
+  never asked to "try again another way".
+- A failed web search is the exception: the summary goes ahead on general guidance, with no
+  sources and a notice saying the search didn't work. This covers only search-service outages. An
+  unsafe search query (a model fault) or an unexpected error in the search code (a bug) still stops
+  the turn with a `503`.
+- The owner sees one of three replies: `422` (fix the request), `503` (a step failed, try again),
+  or `500` (an unexpected bug, same wording as `503`).
+- Which step failed, and why, goes to the server log and onto the turn's MLflow run as the
+  `failed_stage` and `failure_reason` tags. It is never sent to the owner.
+- Recording in MLflow never changes the reply. If MLflow fails, the owner still gets the answer
+  they would have got.
 
-## Public errors
+**The replies:**
 
-Every handled model, query, search, evidence, or synthesis failure returns the same safe `503` body.
-Internal reasons are logged without owner text, and recorded as tags on the turn's MLflow run.
-Invalid schema or history returns a compact `422` issue. Unexpected errors return the same safe
-wording with `500`. An MLflow failure never changes the reply: if MLflow cannot open a run, the
-turn is answered anyway with `run_id: null`, and any failed MLflow write is logged and skipped.
+A `422`, when the request needs fixing:
 
-Both clients retain the current answer after any non-success. The backend never knows whether the
-owner will manually retry.
-
-## HTTP and observability boundary
-
-- `GET /health` returns `{"status": "ok"}` without calling a model or search.
-- `POST /v1/chat` validates `TurnRequest`, executes `run_turn` inside one MLflow run, excludes the
-  internal `emergency_rule` from the public payload, and adds the successful run's `run_id`.
-- Failed turns are still marked failed in MLflow with `failed_stage` and `failure_reason`, but public
-  error responses currently use `"run_id": null`.
-- If `src/frontend/public/dist/` exists, it is mounted last at `/`. Mounting it last preserves
-  `/v1/chat`, `/health`, and FastAPI's `/docs`; serving the browser and API from one origin avoids a
-  separate CORS policy.
-- MLflow traces include owner text, generated queries, model inputs/outputs, and evidence excerpts.
-  See [`../mlflow_tracking/README.md`](../mlflow_tracking/README.md) for storage and deletion rules.
-
-## Verification map
-
-- `tests/test_workflow.py` covers the fixed/adaptive phase boundary, required first adaptive answer,
-  cap decision, emergency short-circuits, and stage order.
-- `tests/test_search.py` covers query scoping, URL enforcement, deduplication, partial failures, the
-  total-failure-only repeat, and the distinction between no raw results and no usable evidence.
-- `tests/test_model_output.py` covers malformed structured output, outcome invariants, and unknown or
-  missing source IDs.
-- `tests/test_api.py` and `tests/test_error_contracts.py` cover public success/error shapes and
-  confirm that failed stages do not call later ones.
-- `tests/test_mlflow_tracking.py` covers one run per turn, failed-run tags, prompt/reply traces, and
-  concurrent-run trace ownership.
-
-Run the deterministic backend-focused suite from the repository root with:
-
-```powershell
-uv run pytest tests/test_workflow.py tests/test_search.py tests/test_model_output.py `
-  tests/test_api.py tests/test_error_contracts.py tests/test_mlflow_tracking.py -q
+```json
+{"error": "Please correct the request and try again.",
+ "issues": [{"field": "history", "message": "Correct the chat history and try again."}]}
 ```
+
+A `503` or `500`, when a step failed:
+
+```json
+{"error": "The assistant could not complete this response. Please try again or contact a veterinarian if concerned.",
+ "run_id": null}
+```
+
+**Every case:**
+
+| What happened | Recorded as (stage: reason) | Reply |
+| --- | --- | --- |
+| Missing or unknown field, species not dog or cat, blank concern or answer, or over 1,000 characters | not recorded: FastAPI rejects it before the turn starts | `422`, naming the field |
+| History over 12 messages | not recorded: FastAPI rejects it before the turn starts | `422` on `history` |
+| History out of order, ends on a question, or the first three questions don't match the standard ones | failure reason `InvalidTurnRequest` | `422` on `history` |
+| An emergency phrase matched | not a failure | Emergency notice; chat ends |
+| The model emergency check said yes | not a failure | Emergency notice; chat ends |
+| A model call timed out | *step*: `timeout` | `503` |
+| Ollama couldn't be reached | *step*: `connection` | `503` |
+| The model's reply didn't fit the required shape | *step*: `invalid_model_output` | `503` |
+| Any other model error | *step*: `model_call_failed` | `503` |
+| First follow-up: the model said it had enough, or repeated a question | `adaptive_question`: `question_required` | `503` |
+| A search query contained a web address, email or phone number | `approved_source_search`: `unsafe_search_query` | `503` |
+| Every search attempt failed | not a failure: a server-log warning (`search_failed`) | Summary without sources, with the search notice |
+| Search worked but found nothing | not a failure: a server-log warning (`no_search_results`) | Summary without sources, with the search notice |
+| Results were found, but no page passed the checks | not a failure: a server-log warning (`insufficient_evidence`) | Summary without sources, with the search notice |
+| Any other unexpected error inside the search code | `approved_source_search`: `search_failed` | `503`, because it is a bug, not a service outage |
+| The summary cited a page ID that wasn't retrieved | `evidence_synthesis`: `ungrounded_synthesis` | `503` |
+| Pages were found, but a summary item cited none | `evidence_synthesis`: `ungrounded_synthesis` | `503` |
+| Any other unexpected error | the error's type | `500` |
+
+*Step* is whichever model step failed: `emergency_check`, `adaptive_question`, `search_query` or
+`evidence_synthesis`.
+
+**These are not failures; the turn carries on:**
+
+- one search query fails but another returns results;
+- a result is off the list, not HTTPS, redirects off the list, fails to download, or has a title
+  over 300 characters: it is skipped;
+- three follow-up questions have been answered: search starts without asking the model;
+- a later follow-up repeats an earlier question: search starts;
+- the web search fails or finds nothing usable: the summary goes ahead without sources.
+
+**Known issue:** a history whose standard questions don't match gets the message "Chat history
+messages must alternate from the assistant and owner", which describes a different problem.
+`error_handling.py` picks the message by searching the error's text.
+
+**Timing:** a model call gives up after 60 seconds, and each search call and page download after
+12 seconds, and search retries stop within 20 seconds. Both screens stop waiting after 65
+seconds. The backend does not notice when a screen
+stops waiting, so it finishes the turn anyway, and **Try again** starts it from the beginning.
+What each screen shows for each reply is in
+[`../frontend/README.md`](../frontend/README.md).
+
+## Endpoints
+
+- `GET /health` returns `{"status": "ok"}` without calling the model or search.
+- `POST /v1/chat` handles one message. A successful reply includes `run_id`, the turn's MLflow run.
+  Error replies have `"run_id": null` for now.
+- `GET /docs` is FastAPI's generated API page.
+- `/` serves the built browser page from `../frontend/public/dist/`, if it has been built. It is
+  added last so it can't hide the routes above. Serving the page and the API from one address
+  means no cross-origin (CORS) setup is needed.
+
+## Tests
+
+| Test file | What it checks |
+| --- | --- |
+| `tests/test_workflow.py` | Step order, both emergency checks on every message, the question counts, the repeat rule, and that a failed step stops later steps |
+| `tests/test_safeguards.py` | Each emergency phrase rule, and ordinary sentences that must not match |
+| `tests/test_search.py` | Query checks, approved-site checks, redirects, duplicates, partial failures, the retry waits and 20-second limit, and "no results" versus "no usable pages" |
+| `tests/test_model_output.py` | Reply shapes, outcome rules, and unknown or missing page IDs |
+| `tests/test_api.py` | Successful replies and `422` replies |
+| `tests/test_error_contracts.py` | Every `503` and `500` case in the table above, that no model step is retried, and that a failed search still gives a summary with the notice |
+| `tests/test_mlflow_tracking.py` | One MLflow run per message, failure tags, traces, and that MLflow failures don't change replies |
+
+These use a stand-in model and fake search results, so they need no Ollama and no network.
+[`../../tests/README.md`](../../tests/README.md) lists every test file and the opt-in tests that
+use the real model.

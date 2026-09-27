@@ -1,12 +1,12 @@
-# Browser client
+# Browser page
 
-A small Svelte page that gives the same chat as the desktop client without asking the visitor to
-install anything. [`../README.md`](../README.md) says why it exists; this file is how to build and
-serve it.
+A small Svelte page that gives the same chat as the desktop window, with nothing to install for the
+person using it. [`../README.md`](../README.md) explains why it exists. This file covers building,
+serving and testing it.
 
 ## Build
 
-Node is needed to build the page, never to run the demo. The visitor needs only a browser.
+Node.js is needed to build the page, never to use it.
 
 ```powershell
 cd src/frontend/public
@@ -14,59 +14,58 @@ npm install
 npm run build          # writes dist/
 ```
 
-`dist/` is a folder of static files and is not committed. The backend serves it, so the page and the
-API share one origin and there is no CORS configuration anywhere.
+`dist/` is a folder of static files and isn't committed. When it exists, the backend serves it at
+`/`, from the same address as the API, so no cross-origin (CORS) setup is needed. If it doesn't
+exist, the backend still starts.
 
-For UI work, `npm run dev` serves on port 5173 and proxies `/v1` and `/health` to
-`http://127.0.0.1:8000`, so a backend started the usual way is reachable from the dev server.
+For work on the page itself, `npm run dev` serves it on port 5173 and passes `/v1` and `/health`
+requests on to the backend at `http://127.0.0.1:8000`.
 
-The npm scripts call `node node_modules/vite/bin/vite.js` rather than the `vite` shim, because npm's
-Windows shims fail when a parent directory name contains a space — as this repository's path does.
+The npm scripts run `node node_modules/vite/bin/vite.js` instead of the usual `vite` shortcut,
+because npm's Windows shortcuts break when a folder in the path has a space, as this project's
+path does.
 
-## Backend integration and current status
-
-`src/backend/app.py` mounts `dist/` after `/v1/chat`, `/health`, and `/docs`, with `html=True` and a
-directory-exists guard. The page and API therefore share one origin, while the backend still starts
-normally when the browser bundle has not been built.
-
-`src/lib/api.js` validates the structured `assessment` payload. The result component renders the
-outcome, fixed wording, reported facts, possible areas when present, suggested actions,
-veterinarian questions, resolved sources, and disclaimer. Malformed success payloads fail closed to
-the stable service-error message.
-
-## Full-process browser test
+## Test
 
 ```powershell
 cd src/frontend/public
 npm run test:e2e
 ```
 
-This builds the production Svelte bundle, starts a real FastAPI process on `127.0.0.1:8765`, and
-drives Microsoft Edge through every question and answer. Dedicated cases cover the three-adaptive
-question cap, `possible_problem`, `nothing_flagged`, deterministic emergency completion,
-misspelled model escalation, and retryable model failure. The test uses the production workflow and
-HTTP/static-serving layers with deterministic model and search adapters, so it verifies the complete
-application path without making CI depend on Ollama or an external search provider. Real Ollama and
-approved-source network checks remain separate opt-in smoke tests.
+This builds the page, starts a real backend on `127.0.0.1:8765` with a stand-in model and fake
+search, and drives Microsoft Edge through six whole chats:
+
+- a "possible problem" summary after all six questions;
+- a "nothing flagged" summary;
+- a failed search that still gives a summary with the search notice;
+- an emergency caught by the phrase list;
+- a misspelled emergency caught by the model check;
+- a failed step, where the typed answer is kept and **Try again** works.
+
+The real model and live search are tested separately (see [`tests/README.md`](../../../tests/README.md)),
+so an outside service being down can't make this test fail.
 
 ## Files
 
-| File | Owns |
+| File | What it does |
 | --- | --- |
-| `src/App.svelte` | The visible flow: intake, transcript, answer box, buttons, and the one `send` path |
-| `src/lib/chatState.js` | The chat state machine, mirroring `ChatState` in `../local/app.py` |
-| `src/lib/api.js` | The single `POST /v1/chat` call and the status-code to owner-text mapping |
-| `src/lib/Bubble.svelte` | One transcript message, including structured assessment and sources |
-| `src/lib/IntakeForm.svelte` | Species and concern only — the rest is asked in the chat |
-| `vite.config.js` | Relative asset paths, `dist/` output, and the dev proxy |
+| `src/App.svelte` | The visible chat: the form, the bubbles, the answer box, the buttons, and the one `send` function |
+| `src/lib/chatState.js` | The chat state, mirroring `ChatState` in `../local/app.py` |
+| `src/lib/api.js` | The one `POST /v1/chat` request, checking each reply's shape, and the text shown for each status code |
+| `src/lib/Bubble.svelte` | One chat bubble, including the full summary with its sources and any search notice |
+| `src/lib/IntakeForm.svelte` | The species and concern form |
+| `vite.config.js` | The build output folder and the development proxy |
 
-`chatState.js` returns a new state from every function instead of editing one in place, so a reply
-that arrives late can never half-apply to the chat now on screen. `assessment` and
-`emergency_notice` are the only terminal API kinds.
+Every function in `chatState.js` returns a new state instead of changing the old one, so a reply
+that arrives late can never half-update the chat on screen. A reply that doesn't have the expected
+shape is shown as the fixed service error.
 
-## What it deliberately does not do
+## Known gaps
 
-No routing, no store library, no streaming, no session storage, no build-time environment variables.
-The page holds one chat in memory and forgets it on reload, which is the same lifetime the desktop
-client has. There is no "ask another question" after a result: that needs its own bounded,
-source-grounded contract, and it is deferred in both clients.
+- **Long text is cut short.** The concern and answer boxes use `maxlength="1000"`, so a browser
+  silently cuts pasted text at 1,000 characters. The cut-off end could hold a warning phrase the
+  emergency check never sees. The desktop window refuses over-long text with a message instead,
+  which is the safe behaviour.
+- **Try again after a failed first message.** If the very first message fails (for example, the
+  backend is down), **Try again** doesn't resend it. The owner has to reload the page. The desktop
+  window handles this case.
