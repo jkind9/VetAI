@@ -78,6 +78,12 @@ Named paths:
 Exit gate: owner facts cannot be authored from retrieved text, noisy page material is bounded to
 relevant evidence, and unsupported or contradictory synthesis fails closed with a named test.
 
+First adapter reliability increment complete: a reproduced gpt-oss assessment tool call used
+`area`, `action`, and `question` for the shared nested `text` field. The adapter now normalises only
+those three known labels and reruns the strict schema; the previously failing real query/synthesis
+smoke passes. J4 must still be rerun because query-shape and repeated-question failures remain
+separate issues.
+
 ### 4. Complete MLflow quality evidence
 
 Named paths:

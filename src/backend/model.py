@@ -197,10 +197,37 @@ def _parse_function_calling_result(result: dict[str, Any], schema: Any) -> Any:
     """Validate gpt-oss output whether Ollama used a tool call or JSON message content."""
     if result.get("parsed") is not None:
         return result["parsed"]
-    content = getattr(result.get("raw"), "content", None)
+    raw = result.get("raw")
+    tool_calls = getattr(raw, "tool_calls", None)
+    if schema is AssessmentDraft and isinstance(tool_calls, list) and len(tool_calls) == 1:
+        tool_call = tool_calls[0]
+        arguments = tool_call.get("args") if isinstance(tool_call, dict) else None
+        if isinstance(arguments, dict):
+            return schema.model_validate(_normalise_grounded_item_fields(arguments))
+    content = getattr(raw, "content", None)
     if not isinstance(content, str):
         return None
     return schema.model_validate_json(content)
+
+
+def _normalise_grounded_item_fields(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Map gpt-oss's known semantic labels to the shared grounded-item field."""
+    normalised = dict(arguments)
+    for section, alias in (
+        ("possible_areas", "area"),
+        ("suggested_actions", "action"),
+        ("questions_for_veterinarian", "question"),
+    ):
+        items = arguments.get(section)
+        if not isinstance(items, list):
+            continue
+        normalised[section] = []
+        for item in items:
+            if isinstance(item, dict) and "text" not in item and alias in item:
+                item = dict(item)
+                item["text"] = item.pop(alias)
+            normalised[section].append(item)
+    return normalised
 
 
 def _turn_variables(turn: TurnRequest) -> dict[str, str]:

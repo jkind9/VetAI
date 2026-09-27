@@ -125,9 +125,11 @@ Runtime composition uses function calling for `gpt-oss:*`, including the default
 because Ollama returns that family's structured results as tool calls. Other configured models keep
 the JSON-schema structured-output method. If gpt-oss ignores a forced tool and writes schema JSON
 in message content, the adapter validates that content against the same Pydantic model; malformed
-or schema-invalid content still fails closed. The gpt-oss reasoning effort is set to `low` so the
-900-token generation bound remains available for the typed answer; other models keep their default
-reasoning setting.
+or schema-invalid content still fails closed. If gpt-oss uses the known semantic labels `area`,
+`action`, and `question` inside an otherwise valid assessment tool call, the adapter maps those
+three labels to the shared `text` field and reruns the complete strict schema. No other field is
+repaired. The gpt-oss reasoning effort is set to `low` so the 900-token generation bound remains
+available for the typed answer; other models keep their default reasoning setting.
 
 The emergency-check chain returns `EmergencyCheck(emergency: bool)` and nothing else on every turn
 not ended by the phrase gate. The adaptive chain asks one question or indicates readiness. The first

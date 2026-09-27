@@ -89,7 +89,9 @@ All four chains share the configured local Ollama model and their typed response
 composition uses function calling for the `gpt-oss:*` family, whose structured results Ollama
 normally returns as tool calls; other model overrides continue to use JSON-schema structured
 output. The gpt-oss adapter also validates schema JSON from message content when the model omits
-the forced tool call. Either route must pass the same typed schema or the stage fails closed.
+the forced tool call. For assessment tool calls only, the known nested labels `area`, `action`, and
+`question` are normalised to the schema's shared `text` field before the complete typed schema is
+rerun; other mismatches still fail closed. Either route must pass the same typed schema.
 The gpt-oss reasoning effort is set to `low` so its bounded output budget is used for that typed
 answer instead of ending during extended reasoning; other model families retain their default.
 
