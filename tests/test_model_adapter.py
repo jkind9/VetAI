@@ -6,8 +6,8 @@ from typing import Any
 
 from langchain_core.runnables import RunnableLambda
 
-from backend.model import OllamaChatModel, PromptFile
-from backend.schemas import AdaptiveDecision
+from backend.model import OllamaChatModel, PromptFile, _parse_function_calling_result
+from backend.schemas import AdaptiveDecision, AssessmentDraft
 from backend.settings import BackendSettings
 
 
@@ -78,4 +78,42 @@ def test_function_calling_chain_accepts_schema_json_when_model_ignores_tool() ->
     assert options == {"method": "function_calling", "include_raw": True}
     assert result == AdaptiveDecision(
         kind="question", question="Do you notice any coughing or wheezing?"
+    )
+
+
+def test_function_calling_parser_recovers_known_grounded_item_field_names() -> None:
+    result = {
+        "raw": SimpleNamespace(
+            content="",
+            tool_calls=[
+                {
+                    "args": {
+                        "outcome": "possible_problem",
+                        "possible_areas": [
+                            {"area": "Ear irritation", "source_ids": ["S1"]}
+                        ],
+                        "suggested_actions": [
+                            {"action": "Record visible changes.", "source_ids": ["S1"]}
+                        ],
+                        "questions_for_veterinarian": [
+                            {
+                                "question": "What changes should I monitor?",
+                                "source_ids": ["S1"],
+                            }
+                        ],
+                    }
+                }
+            ],
+        ),
+        "parsed": None,
+        "parsing_error": ValueError("nested field names did not match the schema"),
+    }
+
+    parsed = _parse_function_calling_result(result, AssessmentDraft)
+
+    assert parsed.possible_areas[0].text == "Ear irritation"
+    assert parsed.suggested_actions[0].text == "Record visible changes."
+    assert (
+        parsed.questions_for_veterinarian[0].text
+        == "What changes should I monitor?"
     )
