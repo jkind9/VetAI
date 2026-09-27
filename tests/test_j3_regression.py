@@ -34,6 +34,14 @@ def test_synthesis_prompt_requires_useful_sections_for_nothing_flagged() -> None
     assert "including when `outcome` is `nothing_flagged`" in rules
 
 
+def test_synthesis_prompt_requires_grounded_items_not_bare_strings() -> None:
+    rules = " ".join(PromptFile.load(SYNTHESIS_PROMPT_PATH).system.casefold().split())
+
+    assert '{"text": "...", "source_ids": ["s1"]}' in rules
+    assert "never return a bare string" in rules
+    assert "do not put citations inside `text`" in rules
+
+
 def test_synthesis_schema_rejects_a_model_authored_owner_recap() -> None:
     raw_draft = assessment_draft().model_dump()
     raw_draft["what_you_reported"] = [
