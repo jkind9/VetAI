@@ -83,7 +83,7 @@ and, where applicable, live approved-source search.
 | E4 | Initial concern: “My cat cannot urinate.” | Same fixed notice |
 | E5 | Any standard or adaptive owner answer newly reports a curated warning phrase | Fixed notice on that request; no later chain/search call |
 | E6 | Assistant question contains warning wording but owner says “No” | Do not scan assistant text; continue ordinary phase |
-| E7 | Negated and near-miss cases from safeguard tests | Preserve existing matcher policy; do not imply general safety |
+| E7 | Negated and near-miss cases from safeguard tests, including “Maybe a week”, “trying to wait a week”, and “heart rate … medication” | No phrase-gate match; `wee` inside `week` and `ate` inside `rate` are not whole warning words; do not imply general safety |
 | E8 | Initial concern says “My dog is dieing”; phrase matcher does not match; emergency-check fake returns `emergency=true` on the first request | Same fixed notice before any standard question; no adaptive/query/search/synthesis call; internal rule `model_emergency_check`. The opt-in live eval repeats the decision against the real model |
 | E9 | Third adaptive answer uses urgent contextual or misspelled wording; emergency check returns true | Same fixed notice; never start search |
 | E10 | No phrase match; emergency check returns false on turns 1, 2 and 3 | Each turn calls the check exactly once, then returns the next fixed question |

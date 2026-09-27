@@ -110,7 +110,7 @@ EMERGENCY_RULES: tuple[EmergencyRule, ...] = (
         # ASPCA advises contacting a vet or poison control for suspected ingestion:
         # https://www.aspca.org/pet-care/general-pet-care/emergency-care-your-pet
         patterns=_compile(
-            r"(?:swallow\w*|ingest\w*|ate|eaten|chewed|got\s+into)\b[^.!?]{0,40}?\b"
+            r"\b(?:swallow\w*|ingest\w*|ate|eaten|chewed|got\s+into)\b[^.!?]{0,40}?\b"
             r"(?:medication|medicine|pills?|tablets?|capsules?|poison\w*|toxin\w*|"
             r"rat\s+bait|antifreeze|chocolate|xylitol|batter(?:y|ies)|drugs?)",
         ),
@@ -120,7 +120,7 @@ EMERGENCY_RULES: tuple[EmergencyRule, ...] = (
         name="cannot_urinate",
         patterns=_compile(
             r"(?:can'?t|cannot|can\s+not|unable\s+to|trying\s+to|straining\s+to|struggling\s+to)"
-            r"[^.!?]{0,20}?\b(?:urinate|pee|wee|pass\s+urine)",
+            r"[^.!?]{0,20}?\b(?:urinate|pee|wee|pass\s+urine)\b",
             r"(?:no|not\s+any)\s+urine",
             r"blocked\s+bladder",
         ),

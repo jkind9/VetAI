@@ -45,6 +45,11 @@ Evidence after alignment:
 The remaining synthesis capability failure belongs to items 2 and 3; it is no longer obscured by
 evaluation/runtime configuration drift.
 
+Additional phrase-gate correction complete: ingestion verbs now require a leading word boundary,
+and the urination alternatives require a trailing boundary. This prevents `ate` inside `rate` and
+`wee` inside `week` from selecting an emergency route while preserving the curated positive cases.
+The focused safeguard matrix is 20/20.
+
 ### 2. Add the all-normal negative-control journey (J4)
 
 Named paths:
