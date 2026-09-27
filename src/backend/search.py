@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
-from time import sleep
+from time import monotonic, sleep
 from typing import Any, Protocol
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
@@ -19,8 +19,10 @@ MAX_EVIDENCE_ITEMS = 4
 MAX_PAGE_BYTES = 500_000
 MAX_EXCERPT_CHARS = 4000
 MAX_REDIRECTS = 3
-MAX_SEARCH_ATTEMPTS = 2
-SEARCH_RETRY_DELAY_SECONDS = 0.25
+# Waits between whole-plan retries after every provider call failed: exponential backoff.
+SEARCH_RETRY_DELAYS_SECONDS = (1.0, 2.0, 4.0)
+# No new attempt starts past this, so retries fit inside the browser's 65 s request timeout.
+SEARCH_TIME_BUDGET_SECONDS = 20.0
 
 _URL = re.compile(r"(?:https?://|www\.)", re.IGNORECASE)
 _EMAIL = re.compile(r"\b[^\s@]+@[^\s@]+\.[^\s@]+\b")
@@ -216,8 +218,14 @@ class ApprovedSourceSearcher:
     def _search_provider(
         self, queries: list[str], domain_filter: str
     ) -> list[dict[str, Any]]:
-        """Run each planned query once, repeating the plan only after total provider failure."""
-        for attempt in range(MAX_SEARCH_ATTEMPTS):
+        """Run each planned query once, repeating the plan with backoff only after total failure."""
+        started = monotonic()
+        delays = (0.0, *SEARCH_RETRY_DELAYS_SECONDS)
+        for attempt, delay in enumerate(delays):
+            if attempt:
+                if monotonic() - started + delay > SEARCH_TIME_BUDGET_SECONDS:
+                    break
+                sleep(delay)
             raw_results: list[dict[str, Any]] = []
             failed_calls = 0
             for query in queries:
@@ -235,11 +243,9 @@ class ApprovedSourceSearcher:
 
             if raw_results or failed_calls < len(queries):
                 return raw_results
-            if attempt + 1 < MAX_SEARCH_ATTEMPTS:
-                sleep(SEARCH_RETRY_DELAY_SECONDS)
 
         raise ModelOutputError(
             "search_failed",
-            "all planned provider calls failed twice",
+            f"all planned provider calls failed on {attempt + 1} attempts",
             stage="approved_source_search",
         )

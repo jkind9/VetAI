@@ -10,8 +10,32 @@ from backend.approved_sources import (
     DEFAULT_SOURCE_CATALOG_PATH,
     ApprovedSourceCatalog,
 )
+from backend import search as search_module
 from backend.schemas import ModelOutputError, SearchPlan
 from backend.search import ApprovedSourceSearcher, FetchedPage, query_is_safe
+
+
+class FakeClock:
+    """Stands in for the search module's clock so retry waits are recorded, not slept."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+@pytest.fixture(autouse=True)
+def fake_clock(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
+    clock = FakeClock()
+    monkeypatch.setattr(search_module, "monotonic", clock.monotonic, raising=False)
+    monkeypatch.setattr(search_module, "sleep", clock.sleep)
+    return clock
 
 
 class FakeSearchClient:
@@ -235,10 +259,33 @@ def test_all_provider_failures_retry_the_same_plan_once_before_succeeding() -> N
     assert client.queries[0] == client.queries[1]
 
 
-def test_all_provider_failures_stop_after_one_retry() -> None:
-    client = SequencedSearchClient(
-        [TimeoutError("first failure"), TimeoutError("second failure")]
+def test_all_provider_failures_back_off_exponentially_then_stop(
+    fake_clock: FakeClock,
+) -> None:
+    client = SequencedSearchClient([TimeoutError(f"failure {n}") for n in range(4)])
+    searcher = ApprovedSourceSearcher(
+        ApprovedSourceCatalog.load(DEFAULT_SOURCE_CATALOG_PATH),
+        search_client=client,
+        page_fetcher=FakePageFetcher({}),
     )
+
+    with pytest.raises(ModelOutputError) as raised:
+        searcher.search(SearchPlan(queries=["dog concern veterinary"]))
+
+    assert raised.value.reason == "search_failed"
+    assert len(client.queries) == 4
+    assert fake_clock.sleeps == [1.0, 2.0, 4.0]
+
+
+def test_slow_provider_failures_stop_retrying_at_the_time_budget(
+    fake_clock: FakeClock,
+) -> None:
+    class SlowFailingClient(SequencedSearchClient):
+        def text(self, query: str, **kwargs) -> list[dict[str, str]]:
+            fake_clock.now += 12.0  # each call burns a full provider timeout
+            return super().text(query, **kwargs)
+
+    client = SlowFailingClient([TimeoutError(f"failure {n}") for n in range(4)])
     searcher = ApprovedSourceSearcher(
         ApprovedSourceCatalog.load(DEFAULT_SOURCE_CATALOG_PATH),
         search_client=client,
@@ -250,6 +297,7 @@ def test_all_provider_failures_stop_after_one_retry() -> None:
 
     assert raised.value.reason == "search_failed"
     assert len(client.queries) == 2
+    assert fake_clock.sleeps == [1.0]
 
 
 def test_empty_provider_results_have_a_distinct_named_outcome() -> None:
