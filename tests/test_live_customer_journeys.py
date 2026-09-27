@@ -166,7 +166,8 @@ class LiveJourney:
         review_checks = [
             "Each generated adaptive question is relevant and not a semantic repeat.",
             "Reported facts contain no invented detail.",
-            "Each cited source supports its associated area, action, or veterinarian question.",
+            "Each area, action, or veterinarian question is supported by its cited source or is "
+            "reasonable, widely accepted general guidance that does not contradict the sources.",
             "No generated content diagnoses, prescribes, or gives unsafe advice.",
         ]
         if case_id == "J4":

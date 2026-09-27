@@ -42,6 +42,21 @@ def test_synthesis_prompt_requires_grounded_items_not_bare_strings() -> None:
     assert "do not put citations inside `text`" in rules
 
 
+def test_synthesis_prompt_allows_reasonable_general_knowledge_consistent_with_evidence() -> None:
+    rules = " ".join(PromptFile.load(SYNTHESIS_PROMPT_PATH).system.casefold().split())
+
+    assert "reasonable, widely accepted general veterinary guidance" in rules
+    assert "must not contradict the evidence" in rules
+    assert "never present general guidance as something the owner reported" in rules
+
+
+def test_synthesis_prompt_handles_an_empty_evidence_list() -> None:
+    rules = " ".join(PromptFile.load(SYNTHESIS_PROMPT_PATH).system.casefold().split())
+
+    assert "if the evidence list is empty" in rules
+    assert '`"source_ids": []`' in rules
+
+
 def test_synthesis_schema_rejects_a_model_authored_owner_recap() -> None:
     raw_draft = assessment_draft().model_dump()
     raw_draft["what_you_reported"] = [
