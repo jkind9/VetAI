@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -47,6 +48,7 @@ OUTCOME_WORDING = {
 }
 
 STANDARD_REPORT_LABELS = ("Duration", "Previous occurrence", "Pattern")
+_SEMANTIC_REPEAT_PATTERNS = (re.compile(r"\b(?:age|how old)\b", re.IGNORECASE),)
 
 TModel = TypeVar("TModel", bound=BaseModel)
 
@@ -111,7 +113,14 @@ def _question_was_already_asked(
         return False
     normalised = question.casefold()
     return any(
-        message.role == "assistant" and message.content.casefold() == normalised
+        message.role == "assistant"
+        and (
+            message.content.casefold() == normalised
+            or any(
+                pattern.search(question) and pattern.search(message.content)
+                for pattern in _SEMANTIC_REPEAT_PATTERNS
+            )
+        )
         for message in history
     )
 
