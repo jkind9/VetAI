@@ -121,6 +121,26 @@ def test_repeated_adaptive_question_moves_to_search_after_one_answer() -> None:
     assert events == ["emergency_check", "adaptive", "plan", "search", "synthesis"]
 
 
+def test_rephrased_age_question_moves_to_search_after_one_answer() -> None:
+    events: list[str] = []
+    chains = FakeChains(
+        adaptive=[
+            AdaptiveDecision(kind="question", question="How old is your dog?")
+        ],
+        events=events,
+    )
+    searcher = FakeSearcher(events=events)
+    request = TurnRequest(
+        intake=intake(),
+        history=ready_history(("What is your dog's age?", "Five years old")),
+    )
+
+    result = run_turn(request, chains, searcher)
+
+    assert result.kind == "assessment"
+    assert events == ["emergency_check", "adaptive", "plan", "search", "synthesis"]
+
+
 @pytest.mark.parametrize("outcome", ["possible_problem", "nothing_flagged"])
 def test_assessment_result_exposes_fixed_wording_for_each_supported_outcome(
     outcome: str,
