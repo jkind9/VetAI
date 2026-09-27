@@ -114,6 +114,13 @@ Exit gate: model, search, retrieval, and synthesis stages have inspectable timin
 the release evidence reports terminal success, structured-output failures, outcome distribution,
 and human-review status by model and prompt version.
 
+Default-database path correction complete: when `MLFLOW_TRACKING_URI` is unset, backend startup now
+selects the literal relative URI `sqlite:///mlflow.db` before creating the MLflow client. This
+prevents project paths containing spaces or `&` from being percent-encoded into a different sibling
+directory, while preserving explicit environment configuration. Unit coverage checks both paths;
+an isolated smoke created and used `mlflow.db` inside a temporary directory containing both
+characters. Stage-timing and release-summary evidence in the exit gate remain pending.
+
 ### 5. Run the reviewer gate and publish the verified state
 
 Named paths and evidence:

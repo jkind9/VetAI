@@ -49,9 +49,11 @@ turn, and the Traces tab has one trace per turn.
 
 ## Where the data goes
 
-- MLflow writes to `MLFLOW_TRACKING_URI` when it is set. Otherwise it writes to `mlflow.db` in the
-  folder the backend was started from. `mlflow ui` reads that same file by default, so start both
-  from the project root.
+- MLflow writes to `MLFLOW_TRACKING_URI` when it is set. Otherwise `start_tracking()` explicitly
+  selects the relative URI `sqlite:///mlflow.db`, which writes to the folder the backend was
+  started from. Setting this URI explicitly prevents MLflow from percent-encoding spaces and `&`
+  in the project path and accidentally creating a second database elsewhere. `mlflow ui` reads
+  the project-root file by default, so start both processes from the project root.
 - The example Docker image (not a supported deployment) sets
   `MLFLOW_TRACKING_URI=sqlite:////home/vetai/mlflow.db`, because its user
   cannot write to `/app`. Those runs are lost when the container is removed.

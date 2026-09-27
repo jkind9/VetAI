@@ -18,6 +18,7 @@ from mlflow import MlflowClient
 from mlflow.entities import Run, Trace
 from mlflow.exceptions import MlflowException
 
+import mlflow_tracking.chat_runs as chat_runs
 from backend.app import create_app
 from backend.error_handling import SERVICE_ERROR_TEXT
 from backend.schemas import (
@@ -28,7 +29,6 @@ from backend.schemas import (
     TurnRequest,
 )
 from conftest import FakeChains, FakeSearcher, standard_history
-import mlflow_tracking.chat_runs as chat_runs
 from mlflow_tracking.chat_runs import EXPERIMENT_NAME, start_tracking
 
 QUESTION_CHAIN = ChatPromptTemplate.from_messages(
@@ -70,6 +70,23 @@ def test_default_tracking_uri_stays_relative_when_environment_is_unset(
     start_tracking()
 
     assert configured == ["sqlite:///mlflow.db"]
+
+
+def test_explicit_tracking_uri_is_not_overridden(monkeypatch: pytest.MonkeyPatch) -> None:
+    configured: list[str] = []
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "sqlite:///configured.db")
+    monkeypatch.setattr(chat_runs.mlflow, "set_tracking_uri", configured.append)
+    monkeypatch.setattr(
+        chat_runs,
+        "MlflowClient",
+        lambda: SimpleNamespace(get_experiment_by_name=lambda _: None),
+    )
+    monkeypatch.setattr(chat_runs.mlflow, "set_experiment", lambda _: None)
+    monkeypatch.setattr(chat_runs.mlflow.langchain, "autolog", lambda: None)
+
+    start_tracking()
+
+    assert configured == []
 
 
 def _request(

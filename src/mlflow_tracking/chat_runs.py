@@ -13,6 +13,7 @@ MLflow writes to MLFLOW_TRACKING_URI when it is set, and otherwise to ./mlflow.d
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Callable
 from time import perf_counter
 from typing import Any
@@ -35,6 +36,8 @@ logger = logging.getLogger(__name__)
 
 def start_tracking() -> None:
     """Record runs in the VetAI experiment, and trace every LangChain call from now on."""
+    if not os.environ.get("MLFLOW_TRACKING_URI"):
+        mlflow.set_tracking_uri("sqlite:///mlflow.db")
     # Save each trace into the database before its turn returns. With background saving, MLflow
     # sometimes writes a trace to files under ./mlruns instead, which splits the data in two and
     # fails in the Docker image, where /app is not writable. Must run before the first trace.
