@@ -144,5 +144,12 @@ Required gate:
 8. one browser journey through the temporary public tunnel;
 9. clean reviewed diff and public branch updated to the verified commit.
 
+Gate 8 passed on 2026-09-27 against the relaunched production bundle through a temporary
+Cloudflare tunnel. A headless Edge journey submitted the deterministic breathing-emergency case,
+received the fixed notice, and produced FINISHED MLflow run
+`cc9718a5b40f4a9ba037ad1d082972e2` with model `gpt-oss:20b` and reply kind
+`emergency_notice` in the project-root `mlflow.db`. The older percent-encoded sibling database was
+unchanged.
+
 Work proceeds in the order above. Each runtime change uses a focused RED test, the smallest GREEN
 implementation, then the relevant focused and full verification commands before the next item.
