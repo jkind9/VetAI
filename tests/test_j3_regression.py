@@ -37,7 +37,7 @@ def test_synthesis_prompt_requires_useful_sections_for_nothing_flagged() -> None
 def test_synthesis_prompt_requires_grounded_items_not_bare_strings() -> None:
     rules = " ".join(PromptFile.load(SYNTHESIS_PROMPT_PATH).system.casefold().split())
 
-    assert '{"text": "...", "source_ids": ["s1"]}' in rules
+    assert '{{"text": "...", "source_ids": ["s1"]}}' in rules
     assert "never return a bare string" in rules
     assert "do not put citations inside `text`" in rules
 

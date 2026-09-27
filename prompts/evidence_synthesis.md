@@ -28,6 +28,9 @@ Rules:
   advice; do not invent a problem to fill either section.
 - Every possible area, suggested action, and veterinarian question must cite one or more
   source IDs present in the evidence.
+- Each entry in those three sections must be an object exactly like
+  `{{"text": "...", "source_ids": ["S1"]}}`. Never return a bare string.
+- Do not put citations inside `text`; list them only in the object's `source_ids` array.
 - Never invent a source ID, title, organisation, URL, symptom, timing, or owner detail.
 - Never give medicines, doses, invasive steps, forced feeding or drinking, unsupported home
   remedies, reassurance, urgency grades, advice to delay veterinary care, or a recommendation for
