@@ -149,7 +149,9 @@ positives. Its first valid `gpt-oss:20b` repetition set on 2026-09-27 was 0/3: o
 on invalid synthesis output, one failed closed on invalid query output, and one repeated the age
 question. Three preceding connection-only attempts were infrastructure failures and are not counted
 as capability runs. J4 has not passed three real-model repeats or human review. Artifacts are retained
-locally under `artifacts/live-journeys/`. These are generative
+locally under `artifacts/live-journeys/`. After the assessment-alias repair and deterministic
+duplicate-question guard, the next 0/3 set reached query and synthesis on every run, then failed
+closed on invalid synthesis output. These are generative
 capability tests, not ordinary deterministic CI. A case counts as true end to end only when it uses:
 
 - the production FastAPI runtime and workflow, reached through `POST /v1/chat` or the production

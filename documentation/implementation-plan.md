@@ -111,7 +111,9 @@ the turn is a `503`, never a silent pass.
 Receives the complete owner history and decides one thing: ask exactly one relevant question, or
 (after the mandatory first adaptive answer) declare the history ready for search. It cannot raise
 an emergency; the emergency-check chain alone does that. It never suggests causes, retrieves
-information, or writes the final result.
+information, or writes the final result. If a later decision exactly repeats an answered question
+(case-insensitively), deterministic policy treats the history as ready instead of displaying the
+repeat or asking the adaptive model for a replacement.
 
 ### Search-query chain
 

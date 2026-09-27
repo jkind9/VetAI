@@ -63,6 +63,11 @@ was 0/3: run 1 failed closed on invalid synthesis output, run 2 failed closed on
 output, and run 3 repeated the age question. The earlier connection-only attempts are not counted as
 capability runs. Three live passes and human-review sign-off remain pending.
 
+After the assessment-alias repair and duplicate-question guard, a new 0/3 set reached query and
+synthesis on every run; all three then failed closed on invalid synthesis output. This isolates the
+current J4 blocker to the assessment response shape rather than emergency, adaptive, query, or
+retrieval routing.
+
 ### 3. Make grounding and synthesis reliability measurable
 
 Named paths:
@@ -81,8 +86,9 @@ relevant evidence, and unsupported or contradictory synthesis fails closed with 
 First adapter reliability increment complete: a reproduced gpt-oss assessment tool call used
 `area`, `action`, and `question` for the shared nested `text` field. The adapter now normalises only
 those three known labels and reruns the strict schema; the previously failing real query/synthesis
-smoke passes. J4 must still be rerun because query-shape and repeated-question failures remain
-separate issues.
+smoke passes. A subsequent deterministic guard now treats an exact later question repeat as
+readiness; all three follow-up J4 runs reached synthesis, where a separate structured-output
+failure remains.
 
 ### 4. Complete MLflow quality evidence
 

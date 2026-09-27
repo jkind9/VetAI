@@ -133,8 +133,11 @@ available for the typed answer; other models keep their default reasoning settin
 
 The emergency-check chain returns `EmergencyCheck(emergency: bool)` and nothing else on every turn
 not ended by the phrase gate. The adaptive chain asks one question or indicates readiness. The first
-call uses `question_required` and the next two use `question_or_ready`. Both modes permit a question; only
-`question_or_ready` permits readiness. There is no adaptive call at the cap. The query chain sees the answered history and returns one to three neutral queries. At
+call uses `question_required` and the next two use `question_or_ready`. Both modes permit a question;
+only `question_or_ready` permits readiness. After the required first adaptive answer, an exact
+case-insensitive repeat of an answered question is treated as readiness and proceeds to search; the
+application does not show the repeat or invent a replacement. There is no adaptive call at the cap.
+The query chain sees the answered history and returns one to three neutral queries. At
 least one query must explicitly compare whether the main sign is normal/expected versus
 concerning/abnormal. The synthesis chain runs after retrieval and receives bounded, untrusted
 evidence blocks identified by source ID.
@@ -226,6 +229,7 @@ source policy and privacy boundary.
 | Standard-question stage | Return next catalog item, after both emergency checks | `200 question` | N/A | Exact deterministic wording |
 | Required first adaptive call says ready | Raise `ModelOutputError(invalid_model_output)` | `503`, preserve draft, **Try again** | No | No substitute question |
 | Malformed/blank/overlong adaptive output | Reject it | Same `503` | No | Raw output hidden |
+| Later adaptive call exactly repeats an answered question | Treat the completed history as ready and continue to search | Continue to search | No | No repeated or substitute question shown |
 | Model timeout | Raise `ModelOutputError(timeout)` | Same `503` | No | No default question/assessment |
 | Ollama connection failure | Raise `ModelOutputError(connection)` | Same `503` | No | No alternate provider |
 | Other provider failure | Raise `ModelOutputError(model_call_failed)` | Same `503` | No | No automatic rephrasing |

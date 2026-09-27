@@ -90,7 +90,9 @@ def run_turn(turn: TurnRequest, chains: Any, searcher: Any) -> TurnResult:
         decision = _validate_chain_output(
             AdaptiveDecision, raw_decision, stage="adaptive_question"
         )
-        if decision.kind == "question":
+        if decision.kind == "question" and not _question_was_already_asked(
+            decision.question, turn.history
+        ):
             return TurnResult(
                 kind="question",
                 reply=decision.question,
@@ -100,6 +102,18 @@ def run_turn(turn: TurnRequest, chains: Any, searcher: Any) -> TurnResult:
             raise ModelOutputError("question_required", stage="adaptive_question")
 
     return _build_assessment(turn, chains, searcher)
+
+
+def _question_was_already_asked(
+    question: str | None, history: list[Message]
+) -> bool:
+    if question is None:
+        return False
+    normalised = question.casefold()
+    return any(
+        message.role == "assistant" and message.content.casefold() == normalised
+        for message in history
+    )
 
 
 def _emergency_result(rule: str) -> TurnResult:
