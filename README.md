@@ -1,6 +1,7 @@
 # VetAI
 
 VetAI is a small demo built for a technical test ([the brief](e071501d-5c3c-4368-9565-a0ba2b94ce0c_Tech_Test.pdf)).
+The code is public at https://github.com/jkind9/VetAI.
 A pet owner describes a worry about their dog or cat. The app asks a few questions, looks up a
 short list of approved veterinary websites, and gives back a summary to take to a vet, with links
 to the pages it used. If anything sounds like an emergency, it stops and tells the owner to contact
@@ -22,7 +23,7 @@ You need:
 
 - Python 3.11 or newer, and [uv](https://docs.astral.sh/uv/) to install it;
 - [Ollama](https://ollama.com/), with about 13 GB of disk space and 16 GB of memory for the model;
-- [Node.js](https://nodejs.org/) 18 or newer, only to build the browser page.
+- [Node.js](https://nodejs.org/) 20 or newer, only to build and test the browser page.
 
 From the project folder:
 
@@ -134,8 +135,8 @@ flowchart TD
    warning phrases, such as "not breathing" or "ate chocolate". If none match, the model is asked
    one yes-or-no question: could these signs need an emergency vet now? If either says yes, the
    owner gets a fixed notice to contact an emergency vet, and the chat ends.
-3. **Three standard questions.** How long has this been happening? Has it happened before? Is it
-   constant, or does it come and go? These are fixed text in the code.
+3. **Three standard questions.** How long has this been happening? Has this happened before? Is it
+   happening constantly, or does it come and go? These are fixed text in the code.
 4. **One to three follow-up questions.** The model writes each one, based on the answers so far.
    It must ask at least one. The code counts them and stops after three.
 5. **Search.** The model turns the answers into one to three short search queries. The app

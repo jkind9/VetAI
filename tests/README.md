@@ -39,8 +39,8 @@ The example conversations these tests check, with their case IDs (S1, A6, J3 and
 
 | File | What it checks |
 | --- | --- |
-| `test_api.py` | Successful question, summary and emergency replies, `422` replies, and serving the built browser page |
-| `test_error_contracts.py` | Every `503` and `500` case, that no model step is retried, and that a failed search still gives a summary with a notice |
+| `test_api.py` | Successful question and summary replies, a `503`, `422` replies, and serving the built browser page |
+| `test_error_contracts.py` | The main `503` and `500` replies over HTTP (malformed model replies, a timeout, an unexpected search error, a made-up page ID, a crash), that no model step is retried, and that a failed search still gives a summary with a notice |
 | `test_mlflow_tracking.py` | One run per message with its parameters, timing and reply kind; failure tags; traces; overlapping turns; MLflow failures that must not change the reply; restoring a deleted experiment; 48 turns at once; the database location |
 | `test_runtime_app.py`, `test_settings.py` | Starting the real app from settings, the model and prompt versions recorded on each run, and the environment variables |
 | `test_launch.py` | The README's command for the desktop window finds the installed package |

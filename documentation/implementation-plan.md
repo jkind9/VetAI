@@ -35,11 +35,11 @@ Desktop form -> POST /v1/chat -> check request -> emergency phrases?
                           one follow-up question OR the final recap
 ```
 
-The principles behind it, all of which still hold:
+The principles behind it, all of which still hold except where noted:
 
 - code enforces the rules and the model fills in the words;
 - the model never writes the emergency notice;
-- no automatic retries and no fallback answers;
+- no automatic retries and no fallback answers (web search later became the one exception, below);
 - no memory on the server: the screen sends the whole chat each time;
 - tests use a stand-in model, so they need no Ollama or network;
 - recording in MLflow never hides or changes a reply.
@@ -61,8 +61,9 @@ sometimes changed what the owner had said when repeating it back. The recap is n
 from the owner's own words.
 
 **Search had to cope with real-world failures.** One failed query used to throw away the good
-results of the others. Each query now runs on its own, and a search where every query fails is
-repeated once. The queries were also leaning towards illness pages, so at least one must now ask
+results of the others. Each query now runs on its own. A search where every query fails is
+retried after 1, 2 and 4 seconds, within 20 seconds in total, and if it still fails the summary is
+written from general guidance with a notice that the search didn't work. The queries were also leaning towards illness pages, so at least one must now ask
 whether the sign is normal or worrying.
 
 **A browser page was added after all.** The plan ruled it out, but a reviewer can open a browser

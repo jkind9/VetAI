@@ -271,7 +271,7 @@ What each screen shows for each reply is in
 
 - `GET /health` returns `{"status": "ok"}` without calling the model or search.
 - `POST /v1/chat` handles one message. A successful reply includes `run_id`, the turn's MLflow run.
-  Error replies have `"run_id": null` for now.
+  `503` and `500` replies have `"run_id": null` for now; `422` replies have no `run_id`.
 - `GET /docs` is FastAPI's generated API page.
 - `/` serves the built browser page from `../frontend/public/dist/`, if it has been built. It is
   added last so it can't hide the routes above. Serving the page and the API from one address
@@ -286,7 +286,7 @@ What each screen shows for each reply is in
 | `tests/test_search.py` | Query checks, approved-site checks, redirects, duplicates, partial failures, the retry waits and 20-second limit, and "no results" versus "no usable pages" |
 | `tests/test_model_output.py` | Reply shapes, outcome rules, and unknown or missing page IDs |
 | `tests/test_api.py` | Successful replies and `422` replies |
-| `tests/test_error_contracts.py` | Every `503` and `500` case in the table above, that no model step is retried, and that a failed search still gives a summary with the notice |
+| `tests/test_error_contracts.py` | The `503` and `500` replies over HTTP: malformed follow-up and summary replies, a timeout, an unexpected search error, a made-up page ID, and an unexpected crash. Also that no model step is retried, and that a failed search still gives a summary with the notice. The remaining failure reasons are tested one layer down, in `tests/test_workflow.py` |
 | `tests/test_mlflow_tracking.py` | One MLflow run per message, failure tags, traces, and that MLflow failures don't change replies |
 
 These use a stand-in model and fake search results, so they need no Ollama and no network.

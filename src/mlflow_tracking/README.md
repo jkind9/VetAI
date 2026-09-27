@@ -16,7 +16,8 @@ Each turn is one **run** in the `vetai-chat` experiment:
 | parameter | `answered_questions` | How many questions the owner had answered before this turn (0 to 6) |
 | metric | `turn_seconds` | How long the turn took |
 | tag | `reply_kind` | `question`, `assessment` or `emergency_notice` |
-| tag | `failed_stage`, `failure_reason` | Only on a failed turn, whose run is marked FAILED: which step failed, and why |
+| tag | `failure_reason` | Only on a failed turn, whose run is marked FAILED: why it failed. For an unexpected error or a rejected history, this is the error's type name |
+| tag | `failed_stage` | Only when a named step failed (a model call, the search or the citation check): which step |
 
 Each run also holds one **trace**, which shows the prompts and replies:
 
@@ -30,10 +31,10 @@ Each run also holds one **trace**, which shows the prompts and replies:
 
 The `run_id` in each successful reply is that turn's run, so you can look it up.
 
-The opt-in emergency-check evaluation (`tests/test_emergency_check_live.py`) adds one more run to
-the same experiment, named `emergency_check_live_eval`. It records `emergencies_caught`,
-`false_alarms` and `cases`, so the result of the 14 test sentences can be checked in MLflow rather
-than only in the test output.
+The opt-in emergency-check evaluation (`tests/test_emergency_check_live.py`) records one run named
+`emergency_check_live_eval`, with `emergencies_caught`, `false_alarms` and `cases` for its 14 test
+sentences. Like every test, it writes to a throwaway MLflow database, not the project's
+`mlflow.db`, so its result is read from the test output.
 
 ## Look at it
 

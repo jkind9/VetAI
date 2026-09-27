@@ -119,7 +119,7 @@ Terms used below:
 | F4 | Any model step returns a malformed reply | The same `503`. No attempt to repair it |
 | F5 | Search fails or finds no usable pages | Not an error: the summary goes ahead without sources, with the search notice |
 | F6 | An unexpected error | `500` with the same text. Details stay in the server log |
-| F7 | MLflow recording | A successful reply includes its MLflow `run_id`; error replies have `run_id: null`. Every failed turn's run is marked FAILED with a `failure_reason` (and `failed_stage` for model, search and citation failures). If MLflow can't open a run, the reply still goes out. A failed MLflow write never changes the reply. A deleted experiment is restored when the server starts |
+| F7 | MLflow recording | A successful reply includes its MLflow `run_id`; `503` and `500` replies have `run_id: null`, and `422` replies have no `run_id`. Every failed turn's run is marked FAILED with a `failure_reason` (and `failed_stage` for model, search and citation failures). If MLflow can't open a run, the reply still goes out. A failed MLflow write never changes the reply. A deleted experiment is restored when the server starts |
 | F8 | Three follow-ups answered | The emergency check still runs, but the model isn't asked for a question, so it can't add a fourth or send a malformed one |
 | F9 | The project folder's path contains a space or `&`, and `MLFLOW_TRACKING_URI` isn't set | Runs are saved to `mlflow.db` in the folder the backend was started from, the same file `uv run mlflow ui` reads. A set `MLFLOW_TRACKING_URI` is always respected |
 
@@ -149,7 +149,6 @@ Terms used below:
 | W5 | The first concern matches a warning phrase | The fixed notice comes back at once; the answer box goes and **New concern** appears |
 | W6 | The concern is misspelled ("dieing") so the phrase list misses it, and the emergency check says yes | The page shows the full fixed notice and **New concern** |
 | W7 | The follow-up step fails after the third standard answer | The page shows the error and **Try again**, and keeps the exact typed answer |
-
 | W8 | The source search fails | The page shows the summary with the search notice, and no citations or "Sources" heading |
 
 W3 to W8 run in a real browser (Playwright) against a real backend and the built page, with the
