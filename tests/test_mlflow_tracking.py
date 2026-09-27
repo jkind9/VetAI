@@ -6,6 +6,7 @@ The runs go to the throwaway database that conftest.py points MLflow at.
 from __future__ import annotations
 
 import threading
+from types import SimpleNamespace
 from typing import Any
 
 import mlflow
@@ -27,6 +28,7 @@ from backend.schemas import (
     TurnRequest,
 )
 from conftest import FakeChains, FakeSearcher, standard_history
+import mlflow_tracking.chat_runs as chat_runs
 from mlflow_tracking.chat_runs import EXPERIMENT_NAME, start_tracking
 
 QUESTION_CHAIN = ChatPromptTemplate.from_messages(
@@ -49,6 +51,25 @@ class QuestionFromLangChain:
     ) -> AdaptiveDecision:
         reply = QUESTION_CHAIN.invoke({"concern": turn.intake.concern})
         return AdaptiveDecision(kind="question", question=reply.content)
+
+
+def test_default_tracking_uri_stays_relative_when_environment_is_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configured: list[str] = []
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    monkeypatch.setattr(chat_runs.mlflow, "set_tracking_uri", configured.append)
+    monkeypatch.setattr(
+        chat_runs,
+        "MlflowClient",
+        lambda: SimpleNamespace(get_experiment_by_name=lambda _: None),
+    )
+    monkeypatch.setattr(chat_runs.mlflow, "set_experiment", lambda _: None)
+    monkeypatch.setattr(chat_runs.mlflow.langchain, "autolog", lambda: None)
+
+    start_tracking()
+
+    assert configured == ["sqlite:///mlflow.db"]
 
 
 def _request(
