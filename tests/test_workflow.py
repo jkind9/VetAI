@@ -100,6 +100,27 @@ def test_ready_after_one_adaptive_answer_runs_plan_search_then_synthesis() -> No
     assert [source.source_id for source in result.assessment.sources] == ["S1"]
 
 
+def test_repeated_adaptive_question_moves_to_search_after_one_answer() -> None:
+    events: list[str] = []
+    repeated_question = "What is your dog's age?"
+    chains = FakeChains(
+        adaptive=[
+            AdaptiveDecision(kind="question", question=repeated_question)
+        ],
+        events=events,
+    )
+    searcher = FakeSearcher(events=events)
+    request = TurnRequest(
+        intake=intake(),
+        history=ready_history((repeated_question, "Five years old")),
+    )
+
+    result = run_turn(request, chains, searcher)
+
+    assert result.kind == "assessment"
+    assert events == ["emergency_check", "adaptive", "plan", "search", "synthesis"]
+
+
 @pytest.mark.parametrize("outcome", ["possible_problem", "nothing_flagged"])
 def test_assessment_result_exposes_fixed_wording_for_each_supported_outcome(
     outcome: str,
