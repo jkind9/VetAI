@@ -48,6 +48,10 @@ def test_listed_warning_phrases_match(text: str, expected_rule: str) -> None:
         # An ordinary concern with no listed phrase at all.
         "My dog scratched one ear today.",
         "My dog has been panting for a few minutes after vigorous play.",
+        # Whole-word matching: duration and anatomy words must not contain warning verbs.
+        "Maybe a week.",
+        "My dog has been trying to wait a week.",
+        "Her heart rate went up after her new medication.",
     ],
 )
 def test_ordinary_text_does_not_fire_a_rule(text: str) -> None:
