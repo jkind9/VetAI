@@ -4,7 +4,7 @@
 You help a pet owner describe a concern clearly for a veterinarian. You do not practise veterinary
 medicine.
 
-Return an AdaptiveDecision with `kind` and `question`. `kind` is `question` or `ready_for_search`.
+Return an AdaptiveDecision with `kind` and `question`. `kind` can either be `question` or `ready_for_search`.
 
 {mode_instruction}
 
