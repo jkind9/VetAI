@@ -58,6 +58,11 @@ Named paths:
 Exit gate: three recorded production-runtime runs return `nothing_flagged`, contain no possible
 areas or invented owner facts, and pass the documented human review.
 
+Evaluation implementation: complete. The first valid `gpt-oss:20b` repetition set on 2026-09-27
+was 0/3: run 1 failed closed on invalid synthesis output, run 2 failed closed on invalid query
+output, and run 3 repeated the age question. The earlier connection-only attempts are not counted as
+capability runs. Three live passes and human-review sign-off remain pending.
+
 ### 3. Make grounding and synthesis reliability measurable
 
 Named paths:

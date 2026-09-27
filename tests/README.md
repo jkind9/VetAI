@@ -23,7 +23,7 @@ approved and rejected evidence deterministically.
 | `test_runtime_app.py` / `test_settings.py` | Runtime composition, the model and prompt versions recorded on each MLflow run, and timeout/source configuration |
 | `test_ollama_smoke.py` | Opt-in real-model adaptive question, query, outcome, and suggested-action shapes with fake evidence |
 | `test_emergency_check_live.py` | Opt-in direct evaluation of the dedicated emergency chain: all seven emergency cases caught, no false alarms on the ordinary set, and aggregate MLflow metrics |
-| `test_live_customer_journeys.py` | Recorded API journeys through real Ollama: J1 keyword emergency, J2 first-turn dedicated model emergency check, and J3 live search plus generated assessment |
+| `test_live_customer_journeys.py` | Recorded API journeys through real Ollama: J1 keyword emergency, J2 first-turn dedicated model emergency check, J3 live search plus generated assessment, and J4 all-normal negative control |
 | `../src/frontend/public/e2e/full-process.spec.js` | Production Svelte bundle through hosted FastAPI: adaptive cap, both outcomes, sources/actions, phrase/dedicated-model emergency routes, and retryable failure |
 
 Case IDs and human-review rules live in

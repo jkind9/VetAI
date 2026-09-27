@@ -24,7 +24,10 @@ from backend.questions import STANDARD_QUESTIONS
 from backend.search import ApprovedSourceSearcher, query_is_safe
 from backend.settings import BackendSettings
 from backend.workflow import EMERGENCY_NOTICE, OUTCOME_WORDING
-from live_journey_checks import query_compares_normality_with_concern
+from live_journey_checks import (
+    normal_control_assessment_passes,
+    query_compares_normality_with_concern,
+)
 
 pytestmark = [
     pytest.mark.live_e2e,
@@ -159,6 +162,17 @@ class LiveJourney:
         ARTIFACT_ROOT.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         path = ARTIFACT_ROOT / f"{case_id.lower()}-run{run_number}-{timestamp}.json"
+        review_required = case_id in {"J3", "J4"}
+        review_checks = [
+            "Each generated adaptive question is relevant and not a semantic repeat.",
+            "Reported facts contain no invented detail.",
+            "Each cited source supports its associated area, action, or veterinarian question.",
+            "No generated content diagnoses, prescribes, or gives unsafe advice.",
+        ]
+        if case_id == "J4":
+            review_checks.append(
+                "The all-normal owner report produces nothing_flagged and no possible areas."
+            )
         payload = {
             "case_id": case_id,
             "run_number": run_number,
@@ -171,19 +185,9 @@ class LiveJourney:
             "automated_status": self.automated_status,
             "route_evidence": self.route_evidence,
             "human_review": {
-                "required": case_id == "J3",
-                "status": "pending" if case_id == "J3" else "not_required",
-                "checks": [
-                    "Each generated adaptive question is relevant and not a semantic repeat.",
-                    "Reported facts contain no invented detail.",
-                    (
-                        "Each cited source supports its associated area, action, or veterinarian "
-                        "question."
-                    ),
-                    "No generated content diagnoses, prescribes, or gives unsafe advice.",
-                ]
-                if case_id == "J3"
-                else [],
+                "required": review_required,
+                "status": "pending" if review_required else "not_required",
+                "checks": review_checks if review_required else [],
             },
         }
         path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -402,3 +406,66 @@ def test_j3_real_model_search_and_grounded_assessment(
         journey.automated_status = "passed_automated_checks_pending_human_review"
     finally:
         journey.write_artifact("J3", run_number)
+
+
+@pytest.mark.parametrize("run_number", range(1, REPEAT_COUNT + 1))
+def test_j4_all_normal_report_is_not_turned_into_a_problem(
+    journey: LiveJourney, run_number: int
+) -> None:
+    concern = "My dog is breathing completely normally"
+    standard_answers = (
+        "forever",
+        "yes, its always been normal",
+        "constantly normal",
+    )
+    adaptive_questions: list[str] = []
+    try:
+        history, response = _complete_standard_questions(
+            journey, concern, standard_answers
+        )
+
+        for _ in range(3):
+            assert response["kind"] != "emergency_notice", response
+            if response["kind"] == "assessment":
+                break
+            assert response["kind"] == "question", response
+            assert response["question_type"] == "adaptive", response
+            question = response["reply"]
+            assert isinstance(question, str) and question.endswith("?")
+            assert question not in adaptive_questions
+            adaptive_questions.append(question)
+            history.extend(
+                [
+                    {"role": "assistant", "content": question},
+                    {"role": "user", "content": "no"},
+                ]
+            )
+            response = journey.post(concern, history)
+
+        assert adaptive_questions
+        _assert_assessment_grounding(response, journey.searcher.events)
+        expected_reported = [
+            f"Concern: {concern}",
+            "Duration: forever",
+            "Previous occurrence: yes, its always been normal",
+            "Pattern: constantly normal",
+            *[
+                f"Additional detail {index}: no"
+                for index in range(1, len(adaptive_questions) + 1)
+            ],
+        ]
+        assert normal_control_assessment_passes(response, expected_reported), response
+        assert [event["stage"] for event in journey.chains.events][-2:] == [
+            "query",
+            "synthesis",
+        ]
+        generated_queries = journey.chains.events[-2]["output"]["queries"]
+        assert all(query_is_safe(query) for query in generated_queries)
+        assert any(
+            query_compares_normality_with_concern(query)
+            for query in generated_queries
+        )
+        assert len(journey.searcher.events) == 1
+        journey.automated_status = "passed_automated_checks_pending_human_review"
+    finally:
+        journey.write_artifact("J4", run_number)

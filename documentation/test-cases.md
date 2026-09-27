@@ -133,7 +133,7 @@ are opt-in smoke tests so provider availability cannot make the full-process con
 
 ## J — real customer-style end-to-end journeys
 
-**Status as of 2026-09-23: partially executed; not ready for reviewer sign-off.** J1 passed once
+**Status as of 2026-09-27: partially executed; not ready for reviewer sign-off.** J1 passed once
 and J2 passed all three required real-model repeats with `llama3:latest`. The initial J3 set exposed
 one model-authored recap containing unsupported retrieved-source terms and two safe
 `503 search_failed` responses. The workflow now constructs the recap from owner-authored input, and
@@ -143,7 +143,13 @@ J3 set generated the intended balanced query each time: one run completed an ass
 returned the safe `503 search_failed` after the one bounded repeat. The completed artifact is still
 `human_review.status=pending`, so J3 remains 0/3 for reviewer sign-off and live-search reliability
 is not yet established. The revised synthesis schema separately passed the four real-Ollama smoke
-tests. Artifacts are retained locally under `artifacts/live-journeys/`. These are generative
+tests before the model paths were aligned; the aligned smoke now exposes the current gpt-oss
+synthesis failure. J4 defines the all-normal negative control that exposed retrieval-driven false
+positives. Its first valid `gpt-oss:20b` repetition set on 2026-09-27 was 0/3: one run failed closed
+on invalid synthesis output, one failed closed on invalid query output, and one repeated the age
+question. Three preceding connection-only attempts were infrastructure failures and are not counted
+as capability runs. J4 has not passed three real-model repeats or human review. Artifacts are retained
+locally under `artifacts/live-journeys/`. These are generative
 capability tests, not ordinary deterministic CI. A case counts as true end to end only when it uses:
 
 - the production FastAPI runtime and workflow, reached through `POST /v1/chat` or the production
@@ -164,7 +170,7 @@ other personal information in these fixtures.
 
 The exact generative wording is not asserted. Automated checks assert the structured contract, route
 trace, citation shape, and explicit safety guards; remaining semantic grounding and quality checks
-require recorded human review. Run J2 and J3 three times before reviewer sign-off and report every
+require recorded human review. Run J2, J3, and J4 three times before reviewer sign-off and report every
 run, rather than keeping only the best output.
 
 ### J1 — deterministic keyword escalation through the production service
@@ -221,6 +227,25 @@ must still be marked **human review: pass** after a reviewer checks relevance of
 question, factual fidelity of the owner-report section, source-to-claim support, and the absence of
 diagnostic, prescriptive, or unsafe content. An artifact with `human_review.status=pending` is not a
 J3 sign-off result.
+
+### J4 — all-normal negative control
+
+This fixture prevents pathology-heavy retrieval from being treated as evidence that the animal has
+a problem. Use the exact owner wording from the reported regression and answer every generated
+adaptive question with `no`.
+
+| Step | Customer input / expected result |
+| --- | --- |
+| Intake | `species=dog`; concern: “My dog is breathing completely normally” |
+| Standard answers | “forever”; “yes, its always been normal”; “constantly normal” |
+| Adaptive phase | The real model asks one to three non-repeated questions; answer each with “no” |
+| Query/search phase | At least one safe query explicitly compares normal/expected with concerning/abnormal; live retrieval returns approved evidence |
+| Assessment phase | Return `200 assessment`, `outcome=nothing_flagged`, and no possible areas |
+| Required content checks | `what_you_reported` exactly matches the owner-authored concern and answers; no rate, symptom, condition, or other fact may be copied or inferred from retrieved pages |
+| Failure conditions | Emergency or `possible_problem`; any possible area; invented owner fact; malformed synthesis or `503`; skipped search; unsafe query; unapproved source |
+
+J4 requires three recorded real-model runs and human-review `pass` on every artifact. A safe `503`
+is correct runtime behavior but remains a failed capability run.
 
 ## Human review rules
 
