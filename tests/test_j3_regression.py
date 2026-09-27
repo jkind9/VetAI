@@ -26,6 +26,14 @@ def test_synthesis_prompt_requires_reported_abnormality_not_pathology_retrieval(
     assert "do not infer abnormality solely because retrieved pages describe" in rules
 
 
+def test_synthesis_prompt_requires_useful_sections_for_nothing_flagged() -> None:
+    rules = PromptFile.load(SYNTHESIS_PROMPT_PATH).system.casefold()
+
+    assert "at least one source-backed suggested action" in rules
+    assert "at least one source-backed question for the veterinarian" in rules
+    assert "including when `outcome` is `nothing_flagged`" in rules
+
+
 def test_synthesis_schema_rejects_a_model_authored_owner_recap() -> None:
     raw_draft = assessment_draft().model_dump()
     raw_draft["what_you_reported"] = [
