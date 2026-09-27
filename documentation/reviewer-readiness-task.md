@@ -68,6 +68,11 @@ synthesis on every run; all three then failed closed on invalid synthesis output
 current J4 blocker to the assessment response shape rather than emergency, adaptive, query, or
 retrieval routing.
 
+The synthesis prompt now explicitly requires useful cited actions and veterinarian questions for
+`nothing_flagged`. An exact recorded-input replay passed, and the next J4 set produced one automated
+and human-reviewed pass. Runs 2 and 3 failed after both bounded live-search provider attempts, so
+the current aggregate is 1/3 rather than a model-selected false positive.
+
 ### 3. Make grounding and synthesis reliability measurable
 
 Named paths:
@@ -88,7 +93,8 @@ First adapter reliability increment complete: a reproduced gpt-oss assessment to
 those three known labels and reruns the strict schema; the previously failing real query/synthesis
 smoke passes. A subsequent deterministic guard now treats an exact later question repeat as
 readiness; all three follow-up J4 runs reached synthesis, where a separate structured-output
-failure remains.
+failure remained. Requiring non-empty useful sections for `nothing_flagged` resolved the reproduced
+shape; the remaining two failures in the latest set are at live search.
 
 ### 4. Complete MLflow quality evidence
 

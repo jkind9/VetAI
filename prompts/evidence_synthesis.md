@@ -22,6 +22,10 @@ Rules:
 - `suggested_actions` gives practical, low-risk next steps supported by the evidence. It may suggest
   observing a sign, recording an episode for the veterinarian, or simple supportive steps such as
   providing access to fresh water or a quiet, cool environment when the evidence supports them.
+- Return at least one source-backed suggested action and at least one source-backed question for the
+  veterinarian, including when `outcome` is `nothing_flagged`. For `nothing_flagged`, keep these to
+  monitoring or recording relevant signs and questions about what change would warrant veterinary
+  advice; do not invent a problem to fill either section.
 - Every possible area, suggested action, and veterinarian question must cite one or more
   source IDs present in the evidence.
 - Never invent a source ID, title, organisation, URL, symptom, timing, or owner detail.

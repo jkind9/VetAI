@@ -132,6 +132,8 @@ rank likelihood, prescribe treatment, invent a URL, or cite an unknown source ID
 area and every suggested action must cite at least one retrieved source ID. Retrieved pages are
 background references, not case evidence: `possible_problem` also requires a positive abnormal
 fact reported by the owner, so pathology-oriented search results alone cannot set the outcome.
+Both outcomes still require at least one source-backed suggested action and one source-backed
+question for the veterinarian; `nothing_flagged` cannot invent a problem to fill those sections.
 
 ## 4. Structured result
 

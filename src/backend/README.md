@@ -148,7 +148,9 @@ prompt version used for a result inspectable without copying prompt text into co
 
 Retrieved pages are background references, not evidence that the animal has a condition. The
 synthesis prompt requires a positive abnormal fact reported by the owner before it can choose
-`possible_problem`, so pathology-oriented results alone cannot set the outcome.
+`possible_problem`, so pathology-oriented results alone cannot set the outcome. Both outcomes,
+including `nothing_flagged`, must still contain at least one source-backed suggested action and one
+source-backed question for the veterinarian.
 
 The synthesis draft chooses only `possible_problem` or `nothing_flagged`. The workflow supplies the
 owner-visible wording, requires possible areas only for `possible_problem`, validates citations for

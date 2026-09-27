@@ -151,7 +151,9 @@ question. Three preceding connection-only attempts were infrastructure failures 
 as capability runs. J4 has not passed three real-model repeats or human review. Artifacts are retained
 locally under `artifacts/live-journeys/`. After the assessment-alias repair and deterministic
 duplicate-question guard, the next 0/3 set reached query and synthesis on every run, then failed
-closed on invalid synthesis output. These are generative
+closed on invalid synthesis output. After the prompt required non-empty cited actions and questions
+for `nothing_flagged`, the next set was 1/3: run 1 passed the automated checks and human review;
+runs 2 and 3 failed after both bounded live-search provider attempts. These are generative
 capability tests, not ordinary deterministic CI. A case counts as true end to end only when it uses:
 
 - the production FastAPI runtime and workflow, reached through `POST /v1/chat` or the production

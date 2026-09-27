@@ -27,7 +27,7 @@ def test_synthesis_prompt_requires_reported_abnormality_not_pathology_retrieval(
 
 
 def test_synthesis_prompt_requires_useful_sections_for_nothing_flagged() -> None:
-    rules = PromptFile.load(SYNTHESIS_PROMPT_PATH).system.casefold()
+    rules = " ".join(PromptFile.load(SYNTHESIS_PROMPT_PATH).system.casefold().split())
 
     assert "at least one source-backed suggested action" in rules
     assert "at least one source-backed question for the veterinarian" in rules
