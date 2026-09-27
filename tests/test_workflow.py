@@ -309,7 +309,6 @@ def _uncited_draft() -> dict:
         ModelOutputError("search_failed", stage="approved_source_search"),
         ModelOutputError("no_search_results", stage="approved_source_search"),
         ModelOutputError("insufficient_evidence", stage="approved_source_search"),
-        TimeoutError("provider timed out"),
     ],
 )
 def test_search_failure_still_returns_an_assessment_with_a_notice(
@@ -380,14 +379,27 @@ def test_uncited_item_is_rejected_when_sources_were_found() -> None:
     assert raised.value.reason == "ungrounded_synthesis"
 
 
-def test_cited_item_is_rejected_when_search_failed() -> None:
+def test_invented_source_ids_are_dropped_when_search_failed() -> None:
     chains = FakeChains(adaptive=[AdaptiveDecision(kind="ready_for_search")])
     searcher = FakeSearcher(
         error=ModelOutputError("search_failed", stage="approved_source_search")
     )
     request = TurnRequest(intake=intake(), history=ready_history(("Any discharge?", "No")))
 
-    with pytest.raises(ModelOutputError) as raised:
-        run_turn(request, chains, searcher)
+    result = run_turn(request, chains, searcher)
 
-    assert raised.value.reason == "ungrounded_synthesis"
+    assert result.assessment is not None
+    assert result.assessment.search_notice == workflow.SEARCH_UNAVAILABLE_NOTICE
+    assert all(not item.source_ids for item in result.assessment.suggested_actions)
+    assert result.assessment.sources == []
+
+
+def test_unexpected_searcher_error_is_not_hidden_as_a_failed_search() -> None:
+    chains = FakeChains(adaptive=[AdaptiveDecision(kind="ready_for_search")])
+    request = TurnRequest(intake=intake(), history=ready_history(("Any discharge?", "No")))
+
+    with pytest.raises(ModelOutputError) as raised:
+        run_turn(request, chains, FakeSearcher(error=ValueError("searcher bug")))
+
+    assert raised.value.reason == "search_failed"
+    assert chains.synthesis_calls == []

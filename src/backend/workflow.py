@@ -18,6 +18,7 @@ from backend.schemas import (
     AssessmentDraft,
     EmergencyCheck,
     EvidenceItem,
+    GroundedItem,
     InvalidTurnRequest,
     Message,
     ModelOutputError,
@@ -197,11 +198,11 @@ def _search_or_nothing(searcher: Any, plan: SearchPlan) -> list[EvidenceItem]:
         if error.reason not in _RECOVERABLE_SEARCH_FAILURES:
             raise
         logger.warning("search unavailable, continuing without sources: %s", error)
-    except Exception as error:  # search implementations must not leak provider exceptions
-        logger.warning(
-            "search unavailable, continuing without sources: %s", type(error).__name__
-        )
-    return []
+        return []
+    except Exception as error:  # an unexpected searcher error is a bug, not a provider outage
+        raise ModelOutputError(
+            "search_failed", type(error).__name__, stage="approved_source_search"
+        ) from error
 
 
 def _call_stage(stage: str, function: Any, *args: Any) -> Any:
@@ -233,6 +234,9 @@ def _ground_assessment(
     evidence: list[EvidenceItem],
     owner_report_summary: list[str],
 ) -> Assessment:
+    if not evidence:
+        # No sources were found, so any cited ID is made up; drop it rather than fail the turn.
+        draft = _without_source_ids(draft)
     evidence_by_id = {item.source_id: item for item in evidence}
     referenced_ids: set[str] = set()
     for collection in (
@@ -285,6 +289,19 @@ def _ground_assessment(
         sources=sources,
         disclaimer=ASSESSMENT_SUFFIX,
         search_notice=None if evidence else SEARCH_UNAVAILABLE_NOTICE,
+    )
+
+
+def _without_source_ids(draft: AssessmentDraft) -> AssessmentDraft:
+    def uncited(items: list[GroundedItem]) -> list[GroundedItem]:
+        return [item.model_copy(update={"source_ids": []}) for item in items]
+
+    return draft.model_copy(
+        update={
+            "possible_areas": uncited(draft.possible_areas),
+            "suggested_actions": uncited(draft.suggested_actions),
+            "questions_for_veterinarian": uncited(draft.questions_for_veterinarian),
+        }
     )
 
 

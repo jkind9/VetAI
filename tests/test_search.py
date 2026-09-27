@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
+from backend import search as search_module
 from backend.approved_sources import (
     DEFAULT_SOURCE_CATALOG_PATH,
     ApprovedSourceCatalog,
 )
-from backend import search as search_module
 from backend.schemas import ModelOutputError, SearchPlan
 from backend.search import ApprovedSourceSearcher, FetchedPage, query_is_safe
 
@@ -296,8 +296,54 @@ def test_slow_provider_failures_stop_retrying_at_the_time_budget(
         searcher.search(SearchPlan(queries=["dog concern veterinary"]))
 
     assert raised.value.reason == "search_failed"
-    assert len(client.queries) == 2
-    assert fake_clock.sleeps == [1.0]
+    assert len(client.queries) == 1  # a second 12 s attempt would not fit in the budget
+    assert fake_clock.sleeps == []
+
+
+def test_retry_that_fits_the_budget_still_runs(fake_clock: FakeClock) -> None:
+    class SlowFailingClient(SequencedSearchClient):
+        def text(self, query: str, **kwargs) -> list[dict[str, str]]:
+            fake_clock.now += 5.0
+            return super().text(query, **kwargs)
+
+    client = SlowFailingClient([TimeoutError(f"failure {n}") for n in range(4)])
+    searcher = ApprovedSourceSearcher(
+        ApprovedSourceCatalog.load(DEFAULT_SOURCE_CATALOG_PATH),
+        search_client=client,
+        page_fetcher=FakePageFetcher({}),
+    )
+
+    with pytest.raises(ModelOutputError):
+        searcher.search(SearchPlan(queries=["dog concern veterinary"]))
+
+    # 5 s, wait 1, 5 s (11 s), wait 2, 5 s (18 s); a 4th attempt would end at 27 s
+    assert len(client.queries) == 3
+    assert fake_clock.sleeps == [1.0, 2.0]
+
+
+def test_result_with_an_overlong_title_is_skipped_not_fatal() -> None:
+    good = "https://vet.cornell.edu/good"
+    bad = "https://vet.cornell.edu/bad"
+    client = FakeSearchClient(
+        [
+            {"title": "x" * 301, "href": bad, "body": "bad"},
+            {"title": "Good page", "href": good, "body": "good"},
+        ]
+    )
+    searcher = ApprovedSourceSearcher(
+        ApprovedSourceCatalog.load(DEFAULT_SOURCE_CATALOG_PATH),
+        search_client=client,
+        page_fetcher=FakePageFetcher(
+            {
+                bad: FetchedPage(final_url=bad, text="usable"),
+                good: FetchedPage(final_url=good, text="usable"),
+            }
+        ),
+    )
+
+    results = searcher.search(SearchPlan(queries=["dog concern veterinary"]))
+
+    assert [(item.source_id, item.title) for item in results] == [("S1", "Good page")]
 
 
 def test_empty_provider_results_have_a_distinct_named_outcome() -> None:

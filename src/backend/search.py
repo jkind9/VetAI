@@ -10,6 +10,7 @@ from typing import Any, Protocol
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import httpx
+from pydantic import ValidationError
 
 from backend.approved_sources import ApprovedSourceCatalog
 from backend.schemas import EvidenceItem, ModelOutputError, SearchPlan
@@ -21,7 +22,9 @@ MAX_EXCERPT_CHARS = 4000
 MAX_REDIRECTS = 3
 # Waits between whole-plan retries after every provider call failed: exponential backoff.
 SEARCH_RETRY_DELAYS_SECONDS = (1.0, 2.0, 4.0)
-# No new attempt starts past this, so retries fit inside the browser's 65 s request timeout.
+# A retry starts only if it should finish inside this budget, judged by how long the last attempt
+# took. This keeps search plus the synthesis call inside the browser's 65 s request timeout unless
+# the provider suddenly slows down mid-attempt.
 SEARCH_TIME_BUDGET_SECONDS = 20.0
 
 _URL = re.compile(r"(?:https?://|www\.)", re.IGNORECASE)
@@ -197,15 +200,17 @@ class ApprovedSourceSearcher:
                     urlsplit(page.final_url).path.rsplit("/", 1)[-1]
                     or final_source.organisation
                 )
-            evidence.append(
-                EvidenceItem(
+            try:
+                item = EvidenceItem(
                     source_id=f"S{len(evidence) + 1}",
                     title=title,
                     url=page.final_url,
                     organisation=final_source.organisation,
                     excerpt=page.text[:MAX_EXCERPT_CHARS],
                 )
-            )
+            except ValidationError:  # e.g. an overlong title: skip this one result
+                continue
+            evidence.append(item)
             if len(evidence) >= MAX_EVIDENCE_ITEMS:
                 break
 
@@ -220,12 +225,15 @@ class ApprovedSourceSearcher:
     ) -> list[dict[str, Any]]:
         """Run each planned query once, repeating the plan with backoff only after total failure."""
         started = monotonic()
+        last_attempt_seconds = 0.0
         delays = (0.0, *SEARCH_RETRY_DELAYS_SECONDS)
         for attempt, delay in enumerate(delays):
             if attempt:
-                if monotonic() - started + delay > SEARCH_TIME_BUDGET_SECONDS:
+                expected_end = monotonic() - started + delay + last_attempt_seconds
+                if expected_end > SEARCH_TIME_BUDGET_SECONDS:
                     break
                 sleep(delay)
+            attempt_started = monotonic()
             raw_results: list[dict[str, Any]] = []
             failed_calls = 0
             for query in queries:
@@ -243,6 +251,7 @@ class ApprovedSourceSearcher:
 
             if raw_results or failed_calls < len(queries):
                 return raw_results
+            last_attempt_seconds = monotonic() - attempt_started
 
         raise ModelOutputError(
             "search_failed",

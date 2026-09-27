@@ -82,13 +82,15 @@ def _uncited_draft() -> dict[str, Any]:
 @pytest.mark.parametrize(
     "searcher",
     [
-        FakeSearcher(error=TimeoutError("search provider timed out")),
+        FakeSearcher(
+            error=ModelOutputError("search_failed", stage="approved_source_search")
+        ),
         FakeSearcher(results=[]),
         FakeSearcher(
             error=ModelOutputError("no_search_results", stage="approved_source_search")
         ),
     ],
-    ids=["provider_error", "no_evidence", "no_search_results"],
+    ids=["search_failed", "no_evidence", "no_search_results"],
 )
 def test_search_failure_returns_an_assessment_with_a_notice_and_no_sources(
     searcher: FakeSearcher,
@@ -106,6 +108,16 @@ def test_search_failure_returns_an_assessment_with_a_notice_and_no_sources(
     assert assessment["sources"] == []
     assert len(searcher.calls) == 1
     assert chains.synthesis_calls[0][1] == []
+
+
+def test_unexpected_searcher_error_is_a_stable_503_without_synthesis() -> None:
+    chains = FakeChains(adaptive=[AdaptiveDecision(kind="ready_for_search")])
+    searcher = FakeSearcher(error=TimeoutError("unexpected searcher error"))
+
+    response = _client(chains, searcher).post("/v1/chat", json=_ready_request())
+
+    _assert_service_error(response)
+    assert chains.synthesis_calls == []
 
 
 def test_malformed_synthesis_output_is_a_stable_503() -> None:
