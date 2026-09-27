@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, TypeVar
 
@@ -47,10 +48,21 @@ OUTCOME_WORDING = {
     ),
 }
 
-STANDARD_REPORT_LABELS = ("Duration", "Previous occurrence", "Pattern")
+SEARCH_UNAVAILABLE_NOTICE = (
+    "The source search did not work, so this result is based on general guidance and has no "
+    "linked sources."
+)
+
+# Search-provider outcomes that still let the summary go ahead without sources. An unsafe query
+# is a model fault, so it still fails the turn.
+_RECOVERABLE_SEARCH_FAILURES = {"search_failed", "no_search_results", "insufficient_evidence"}
+
+STANDARD_REPORT_LABELS =("Duration", "Previous occurrence", "Pattern")
 _SEMANTIC_REPEAT_PATTERNS = (re.compile(r"\b(?:age|how old)\b", re.IGNORECASE),)
 
 TModel = TypeVar("TModel", bound=BaseModel)
+
+logger = logging.getLogger(__name__)
 
 
 def run_turn(turn: TurnRequest, chains: Any, searcher: Any) -> TurnResult:
@@ -165,18 +177,7 @@ def _build_assessment(turn: TurnRequest, chains: Any, searcher: Any) -> TurnResu
     raw_plan = _call_stage("search_query", chains.generate_search_plan, turn)
     plan = _validate_chain_output(SearchPlan, raw_plan, stage="search_query")
 
-    try:
-        evidence = searcher.search(plan)
-    except ModelOutputError:
-        raise
-    except Exception as error:  # search implementations must not leak provider exceptions
-        raise ModelOutputError(
-            "search_failed", type(error).__name__, stage="approved_source_search"
-        ) from error
-    if not evidence:
-        raise ModelOutputError(
-            "insufficient_evidence", stage="approved_source_search"
-        )
+    evidence = _search_or_nothing(searcher, plan)
 
     raw_draft = _call_stage(
         "evidence_synthesis", chains.synthesise_assessment, turn, evidence
@@ -186,6 +187,21 @@ def _build_assessment(turn: TurnRequest, chains: Any, searcher: Any) -> TurnResu
     )
     assessment = _ground_assessment(draft, evidence, _owner_report_summary(turn))
     return TurnResult(kind="assessment", assessment=assessment)
+
+
+def _search_or_nothing(searcher: Any, plan: SearchPlan) -> list[EvidenceItem]:
+    """Return the evidence, or an empty list when the search provider let us down."""
+    try:
+        return list(searcher.search(plan))
+    except ModelOutputError as error:
+        if error.reason not in _RECOVERABLE_SEARCH_FAILURES:
+            raise
+        logger.warning("search unavailable, continuing without sources: %s", error)
+    except Exception as error:  # search implementations must not leak provider exceptions
+        logger.warning(
+            "search unavailable, continuing without sources: %s", type(error).__name__
+        )
+    return []
 
 
 def _call_stage(stage: str, function: Any, *args: Any) -> Any:
@@ -234,6 +250,20 @@ def _ground_assessment(
             f"unknown source IDs: {sorted(unknown)}",
             stage="evidence_synthesis",
         )
+    if evidence and any(
+        not grounded.source_ids
+        for collection in (
+            draft.possible_areas,
+            draft.suggested_actions,
+            draft.questions_for_veterinarian,
+        )
+        for grounded in collection
+    ):
+        raise ModelOutputError(
+            "ungrounded_synthesis",
+            "an item cited no source although sources were found",
+            stage="evidence_synthesis",
+        )
 
     sources = [
         SourceCitation(
@@ -254,6 +284,7 @@ def _ground_assessment(
         questions_for_veterinarian=draft.questions_for_veterinarian,
         sources=sources,
         disclaimer=ASSESSMENT_SUFFIX,
+        search_notice=None if evidence else SEARCH_UNAVAILABLE_NOTICE,
     )
 
 

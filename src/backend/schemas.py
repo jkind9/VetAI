@@ -123,7 +123,8 @@ class GroundedItem(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, frozen=True)
 
     text: str = Field(min_length=1, max_length=MAX_SECTION_ITEM_CHARS)
-    source_ids: list[str] = Field(min_length=1, max_length=4)
+    # Empty only when the search failed; the workflow enforces at least one ID otherwise.
+    source_ids: list[str] = Field(max_length=4)
 
 
 class AssessmentDraft(BaseModel):
@@ -165,6 +166,7 @@ class Assessment(BaseModel):
     questions_for_veterinarian: list[GroundedItem]
     sources: list[SourceCitation]
     disclaimer: str
+    search_notice: str | None = None
 
 
 class TurnResult(BaseModel):

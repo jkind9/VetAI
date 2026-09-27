@@ -119,6 +119,25 @@ def test_a_finished_assessment_shows_its_sections_and_offers_a_new_concern(windo
     assert chat_window.send_button.isHidden() is True
 
 
+def test_an_assessment_without_sources_shows_the_search_notice(window) -> None:
+    chat_window, _ = window
+    chat_window.concern.setText("My dog keeps scratching.")
+    chat_window._send()
+    payload = assessment_payload()
+    for section in ("possible_areas", "suggested_actions", "questions_for_veterinarian"):
+        payload[section] = [{**item, "source_ids": []} for item in payload[section]]
+    payload["sources"] = []
+    payload["search_notice"] = "The source search did not work."
+
+    chat_window._handle_result(1, ApiResult(kind="assessment", assessment=payload))
+
+    shown = chat_window.transcript.toPlainText()
+    assert "The source search did not work." in shown
+    assert "Note when the scratching happens." in shown
+    assert "[]" not in shown
+    assert "Sources" not in shown
+
+
 def test_window_ends_or_ignores_an_abandoned_turn(window) -> None:
     chat_window, sent = window
     chat_window._send()

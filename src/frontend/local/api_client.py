@@ -75,6 +75,8 @@ def _is_assessment(value: object) -> bool:
         return False
     if not _is_list_of(value.get("what_you_reported"), _is_text):
         return False
+    if value.get("search_notice") is not None and not _is_text(value["search_notice"]):
+        return False
     if not all(_is_list_of(value.get(section), _is_cited_item) for section in CITED_SECTIONS):
         return False
     return _is_list_of(value.get("sources"), _is_source)

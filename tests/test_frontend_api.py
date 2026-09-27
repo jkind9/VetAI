@@ -65,6 +65,19 @@ def test_malformed_assessment_is_not_shown_to_the_owner(assessment: object) -> N
     assert parse_response(200, _assessment_body(assessment)).error == SERVICE_ERROR_TEXT
 
 
+def test_assessment_without_sources_keeps_its_search_notice() -> None:
+    assessment = {
+        **assessment_payload(),
+        "sources": [],
+        "search_notice": "The source search did not work.",
+    }
+
+    result = parse_response(200, _assessment_body(assessment))
+
+    assert result.assessment == assessment
+    assert result.error is None
+
+
 def test_validation_response_keeps_issues_for_field_correction() -> None:
     result = parse_response(
         422,

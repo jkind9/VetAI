@@ -71,6 +71,17 @@ test('owner completes every question and receives a nothing-flagged assessment',
   await expect(page.getByRole('button', { name: 'New concern' })).toBeVisible();
 });
 
+test('a failed source search still returns an assessment with a notice', async ({ page }) => {
+  await page.goto('/');
+  await completeQuestions(page, 'My dog has panting while resting and the search is down.');
+  await answer(page, 'No other changes.', 'Possible problem — see a veterinarian');
+
+  await expect(page.getByText('The source search did not work', { exact: false })).toBeVisible();
+  await expect(page.getByText('Record a video if the panting happens again.')).toBeVisible();
+  await expect(page.getByText('Sources', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('[]', { exact: false })).toHaveCount(0);
+});
+
 test('deterministic emergency concern ends immediately with the fixed notice', async ({ page }) => {
   await page.goto('/');
   await sendConcern(page, 'My dog is struggling to breathe.');

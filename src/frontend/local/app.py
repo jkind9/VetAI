@@ -170,12 +170,15 @@ def _assessment_html(assessment: dict[str, Any]) -> str:
     sources = [_source_html(source) for source in assessment["sources"]]
 
     parts = [f"<b>{escape(title)}</b>", f"<p>{_text(assessment['outcome_wording'])}</p>"]
+    if assessment.get("search_notice"):
+        parts.append(f"<p><i>{_text(assessment['search_notice'])}</i></p>")
     parts.append(_section_html("What you reported", reported))
     if assessment["possible_areas"]:
         parts.append(_section_html("Possible areas", _cited(assessment["possible_areas"])))
     parts.append(_section_html("Suggested actions", _cited(assessment["suggested_actions"])))
     parts.append(_section_html("Questions for your veterinarian", questions))
-    parts.append(_section_html("Sources", sources))
+    if sources:
+        parts.append(_section_html("Sources", sources))
     parts.append(f"<p><i>{_text(assessment['disclaimer'])}</i></p>")
     return "".join(parts)
 
@@ -187,7 +190,12 @@ def _section_html(title: str, items: list[str]) -> str:
 
 def _cited(items: list[dict[str, Any]]) -> list[str]:
     """Each item's text followed by the source IDs it cites, for example "[S1, S2]"."""
-    return [f"{_text(item['text'])} [{escape(', '.join(item['source_ids']))}]" for item in items]
+    return [
+        f"{_text(item['text'])} [{escape(', '.join(item['source_ids']))}]"
+        if item["source_ids"]
+        else _text(item["text"])
+        for item in items
+    ]
 
 
 def _source_html(source: dict[str, str]) -> str:

@@ -24,20 +24,23 @@ function isStringList(value) {
   return Array.isArray(value) && value.length > 0 && value.every(isString);
 }
 
-function isGroundedItem(value) {
+// Items cite no source only when the search failed and the assessment carries a notice.
+function isGroundedItem(value, uncited) {
   return (
     value !== null &&
     typeof value === 'object' &&
     isString(value.text) &&
-    isStringList(value.source_ids)
+    (uncited
+      ? Array.isArray(value.source_ids) && value.source_ids.length === 0
+      : isStringList(value.source_ids))
   );
 }
 
-function isGroundedList(value, { allowEmpty = false } = {}) {
+function isGroundedList(value, { allowEmpty = false, uncited = false } = {}) {
   return (
     Array.isArray(value) &&
     (allowEmpty || value.length > 0) &&
-    value.every(isGroundedItem)
+    value.every((item) => isGroundedItem(item, uncited))
   );
 }
 
@@ -66,8 +69,12 @@ function isAssessment(value) {
     return false;
   }
 
+  const notice = value.search_notice;
+  if (notice !== undefined && notice !== null && !isString(notice)) return false;
+  const uncited = isString(notice);
+
   const possibleAreasValid =
-    isGroundedList(value.possible_areas, { allowEmpty: true }) &&
+    isGroundedList(value.possible_areas, { allowEmpty: true, uncited }) &&
     (value.outcome === 'possible_problem'
       ? value.possible_areas.length > 0
       : value.possible_areas.length === 0);
@@ -76,10 +83,10 @@ function isAssessment(value) {
     isString(value.outcome_wording) &&
     isStringList(value.what_you_reported) &&
     possibleAreasValid &&
-    isGroundedList(value.suggested_actions) &&
-    isGroundedList(value.questions_for_veterinarian) &&
+    isGroundedList(value.suggested_actions, { uncited }) &&
+    isGroundedList(value.questions_for_veterinarian, { uncited }) &&
     Array.isArray(value.sources) &&
-    value.sources.length > 0 &&
+    (uncited ? value.sources.length === 0 : value.sources.length > 0) &&
     value.sources.every(isSource) &&
     isString(value.disclaimer)
   );

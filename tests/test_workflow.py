@@ -293,3 +293,101 @@ def test_initial_emergency_still_bypasses_every_stage() -> None:
     assert chains.emergency_calls == []
     assert chains.adaptive_calls == []
     assert searcher.calls == []
+
+
+def _uncited_draft() -> dict:
+    raw = assessment_draft().model_dump()
+    for section in ("possible_areas", "suggested_actions", "questions_for_veterinarian"):
+        for item in raw[section]:
+            item["source_ids"] = []
+    return raw
+
+
+@pytest.mark.parametrize(
+    "search_error",
+    [
+        ModelOutputError("search_failed", stage="approved_source_search"),
+        ModelOutputError("no_search_results", stage="approved_source_search"),
+        ModelOutputError("insufficient_evidence", stage="approved_source_search"),
+        TimeoutError("provider timed out"),
+    ],
+)
+def test_search_failure_still_returns_an_assessment_with_a_notice(
+    search_error: Exception,
+) -> None:
+    chains = FakeChains(
+        adaptive=[AdaptiveDecision(kind="ready_for_search")],
+        assessments=[_uncited_draft()],
+    )
+    request = TurnRequest(intake=intake(), history=ready_history(("Any discharge?", "No")))
+
+    result = run_turn(request, chains, FakeSearcher(error=search_error))
+
+    assert result.kind == "assessment"
+    assert result.assessment is not None
+    assert result.assessment.search_notice == workflow.SEARCH_UNAVAILABLE_NOTICE
+    assert result.assessment.sources == []
+    assert chains.synthesis_calls[0][1] == []
+
+
+def test_empty_search_results_list_is_treated_as_a_failed_search() -> None:
+    chains = FakeChains(
+        adaptive=[AdaptiveDecision(kind="ready_for_search")],
+        assessments=[_uncited_draft()],
+    )
+    request = TurnRequest(intake=intake(), history=ready_history(("Any discharge?", "No")))
+
+    result = run_turn(request, chains, FakeSearcher(results=[]))
+
+    assert result.assessment is not None
+    assert result.assessment.search_notice == workflow.SEARCH_UNAVAILABLE_NOTICE
+
+
+def test_successful_search_has_no_notice() -> None:
+    chains = FakeChains(adaptive=[AdaptiveDecision(kind="ready_for_search")])
+    request = TurnRequest(intake=intake(), history=ready_history(("Any discharge?", "No")))
+
+    result = run_turn(request, chains, FakeSearcher())
+
+    assert result.assessment is not None
+    assert result.assessment.search_notice is None
+
+
+def test_unsafe_search_query_still_fails_the_turn() -> None:
+    chains = FakeChains(adaptive=[AdaptiveDecision(kind="ready_for_search")])
+    searcher = FakeSearcher(
+        error=ModelOutputError("unsafe_search_query", stage="approved_source_search")
+    )
+    request = TurnRequest(intake=intake(), history=ready_history(("Any discharge?", "No")))
+
+    with pytest.raises(ModelOutputError) as raised:
+        run_turn(request, chains, searcher)
+
+    assert raised.value.reason == "unsafe_search_query"
+    assert chains.synthesis_calls == []
+
+
+def test_uncited_item_is_rejected_when_sources_were_found() -> None:
+    chains = FakeChains(
+        adaptive=[AdaptiveDecision(kind="ready_for_search")],
+        assessments=[_uncited_draft()],
+    )
+    request = TurnRequest(intake=intake(), history=ready_history(("Any discharge?", "No")))
+
+    with pytest.raises(ModelOutputError) as raised:
+        run_turn(request, chains, FakeSearcher())
+
+    assert raised.value.reason == "ungrounded_synthesis"
+
+
+def test_cited_item_is_rejected_when_search_failed() -> None:
+    chains = FakeChains(adaptive=[AdaptiveDecision(kind="ready_for_search")])
+    searcher = FakeSearcher(
+        error=ModelOutputError("search_failed", stage="approved_source_search")
+    )
+    request = TurnRequest(intake=intake(), history=ready_history(("Any discharge?", "No")))
+
+    with pytest.raises(ModelOutputError) as raised:
+        run_turn(request, chains, searcher)
+
+    assert raised.value.reason == "ungrounded_synthesis"

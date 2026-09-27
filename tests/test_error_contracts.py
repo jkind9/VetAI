@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 import mlflow_tracking.chat_runs as chat_runs
 from backend.app import create_app
 from backend.error_handling import SERVICE_ERROR_TEXT
 from backend.schemas import AdaptiveDecision, ModelOutputError
+from backend.workflow import SEARCH_UNAVAILABLE_NOTICE
 from conftest import FakeChains, FakeSearcher, assessment_draft, ready_history
 
 
@@ -69,42 +71,41 @@ def test_provider_timeout_is_a_stable_503_without_retry() -> None:
     assert searcher.calls == []
 
 
-def test_search_failure_is_a_stable_503_without_synthesis_or_retry() -> None:
-    chains = FakeChains(adaptive=[AdaptiveDecision(kind="ready_for_search")])
-    searcher = FakeSearcher(error=TimeoutError("search provider timed out"))
-
-    response = _client(chains, searcher).post("/v1/chat", json=_ready_request())
-
-    _assert_service_error(response)
-    assert len(chains.plan_calls) == 1
-    assert len(searcher.calls) == 1
-    assert chains.synthesis_calls == []
+def _uncited_draft() -> dict[str, Any]:
+    raw = assessment_draft().model_dump()
+    for section in ("possible_areas", "suggested_actions", "questions_for_veterinarian"):
+        for item in raw[section]:
+            item["source_ids"] = []
+    return raw
 
 
-def test_no_evidence_is_a_stable_503_without_synthesis_or_retry() -> None:
-    chains = FakeChains(adaptive=[AdaptiveDecision(kind="ready_for_search")])
-    searcher = FakeSearcher(results=[])
-
-    response = _client(chains, searcher).post("/v1/chat", json=_ready_request())
-
-    _assert_service_error(response)
-    assert len(chains.plan_calls) == 1
-    assert len(searcher.calls) == 1
-    assert chains.synthesis_calls == []
-
-
-def test_no_search_results_is_a_stable_503_without_synthesis() -> None:
-    chains = FakeChains(adaptive=[AdaptiveDecision(kind="ready_for_search")])
-    searcher = FakeSearcher(
-        error=ModelOutputError("no_search_results", stage="approved_source_search")
+@pytest.mark.parametrize(
+    "searcher",
+    [
+        FakeSearcher(error=TimeoutError("search provider timed out")),
+        FakeSearcher(results=[]),
+        FakeSearcher(
+            error=ModelOutputError("no_search_results", stage="approved_source_search")
+        ),
+    ],
+    ids=["provider_error", "no_evidence", "no_search_results"],
+)
+def test_search_failure_returns_an_assessment_with_a_notice_and_no_sources(
+    searcher: FakeSearcher,
+) -> None:
+    chains = FakeChains(
+        adaptive=[AdaptiveDecision(kind="ready_for_search")],
+        assessments=[_uncited_draft()],
     )
 
     response = _client(chains, searcher).post("/v1/chat", json=_ready_request())
 
-    _assert_service_error(response)
-    assert len(chains.plan_calls) == 1
+    assert response.status_code == 200
+    assessment = response.json()["assessment"]
+    assert assessment["search_notice"] == SEARCH_UNAVAILABLE_NOTICE
+    assert assessment["sources"] == []
     assert len(searcher.calls) == 1
-    assert chains.synthesis_calls == []
+    assert chains.synthesis_calls[0][1] == []
 
 
 def test_malformed_synthesis_output_is_a_stable_503() -> None:

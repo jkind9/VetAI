@@ -33,6 +33,9 @@
       <article class="assessment">
         <h2>{outcomeTitle}</h2>
         <p>{assessment.outcome_wording}</p>
+        {#if assessment.search_notice}
+          <p class="search-notice" role="note">{assessment.search_notice}</p>
+        {/if}
 
         <section>
           <h3>What you reported</h3>
@@ -48,7 +51,7 @@
             <h3>Possible areas</h3>
             <ul>
               {#each assessment.possible_areas as item}
-                <li>{item.text} <span class="citation">[{item.source_ids.join(', ')}]</span></li>
+                <li>{item.text}{#if item.source_ids.length > 0} <span class="citation">[{item.source_ids.join(', ')}]</span>{/if}</li>
               {/each}
             </ul>
           </section>
@@ -58,7 +61,7 @@
           <h3>Suggested actions</h3>
           <ul>
             {#each assessment.suggested_actions as item}
-              <li>{item.text} <span class="citation">[{item.source_ids.join(', ')}]</span></li>
+              <li>{item.text}{#if item.source_ids.length > 0} <span class="citation">[{item.source_ids.join(', ')}]</span>{/if}</li>
             {/each}
           </ul>
         </section>
@@ -67,23 +70,25 @@
           <h3>Questions for your veterinarian</h3>
           <ul>
             {#each assessment.questions_for_veterinarian as item}
-              <li>{item.text} <span class="citation">[{item.source_ids.join(', ')}]</span></li>
+              <li>{item.text}{#if item.source_ids.length > 0} <span class="citation">[{item.source_ids.join(', ')}]</span>{/if}</li>
             {/each}
           </ul>
         </section>
 
-        <section>
-          <h3>Sources</h3>
-          <ul>
-            {#each assessment.sources as source}
-              <li>
-                <span class="citation">[{source.source_id}]</span>
-                <a href={source.url} target="_blank" rel="noreferrer">{source.title}</a>
-                — {source.organisation}
-              </li>
-            {/each}
-          </ul>
-        </section>
+        {#if assessment.sources.length > 0}
+          <section>
+            <h3>Sources</h3>
+            <ul>
+              {#each assessment.sources as source}
+                <li>
+                  <span class="citation">[{source.source_id}]</span>
+                  <a href={source.url} target="_blank" rel="noreferrer">{source.title}</a>
+                  — {source.organisation}
+                </li>
+              {/each}
+            </ul>
+          </section>
+        {/if}
 
         <p class="disclaimer">{assessment.disclaimer}</p>
       </article>
@@ -171,6 +176,13 @@
     color: var(--text-quiet);
     font-size: 0.82rem;
   }
+  .search-notice {
+    padding: 0.5rem 0.7rem;
+    border-left: 3px solid var(--line-urgent);
+    background: var(--surface);
+    font-size: 0.9rem;
+  }
+
   .disclaimer {
     margin-top: 1rem;
     padding-top: 0.75rem;
