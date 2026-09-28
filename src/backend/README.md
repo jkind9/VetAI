@@ -94,19 +94,8 @@ chains.synthesise_assessment(turn, evidence)   # -> AssessmentDraft
 Each chain is `prompt | model.with_structured_output(schema)`, so the model must reply in the
 shape of a Pydantic class from `schemas.py`. A reply that doesn't fit is rejected and never shown.
 `mode` tells the follow-up chain whether it may say it has enough: `question_required` for the
-first follow-up, `question_or_ready` after that.
-
-**gpt-oss specifics.** Ollama returns gpt-oss's structured replies as function calls, so the
-backend uses LangChain's `function_calling` method for any `gpt-oss:*` model and `json_schema`
-for other models. Two gpt-oss quirks are handled in `model.py`:
-
-- when it writes the JSON in its message text instead of a function call, that text is checked
-  against the same Pydantic class;
-- when it names the summary's item field `area`, `action` or `question` instead of `text`, those
-  three names are mapped to `text` and the reply is checked again. No other field is repaired.
-
-Its reasoning effort is set to "low", because its thinking and its answer share the same
-900-token output limit.
+first follow-up, `question_or_ready` after that. For gpt-oss each chain has one more step, explained
+in [How gpt-oss and llama3 behave differently](#how-gpt-oss-and-llama3-behave-differently).
 
 The model's context window (how much text it reads at once) is set to 16,384 tokens
 (`CONTEXT_WINDOW_TOKENS`). Ollama's default of about 2,000 tokens silently dropped the start of
@@ -133,6 +122,77 @@ IDs that were actually cited.
 **Prompt versions.** Each prompt file has `<!-- system -->` and `<!-- human -->` sections.
 `PromptFile.load` splits them and takes a SHA-256 fingerprint of the file, and every MLflow run
 records the four fingerprints. So you can tell which prompt text produced which result.
+
+## How gpt-oss and llama3 behave differently
+
+The same four chains behave differently on the two models tried, so the backend treats gpt-oss
+differently. For llama3 and any other model, each chain is the plain LangChain form:
+`prompt | model.with_structured_output(schema)`. For gpt-oss it needs an extra reading step.
+
+MLflow traced every model call while this was worked out, so the table below comes from the
+traces in `mlflow.db` (25 to 27 September 2026) and from the tests that pin each fix.
+
+| Behaviour | llama3 8B | gpt-oss:20b | What the code does |
+| --- | --- | --- | --- |
+| How a structured reply is requested | `json_schema`: Ollama restricts the model's output to the schema. All 13 recorded calls worked | With `json_schema`, its one recorded call (25 Sep, 11:46 UTC) returned a completely empty reply | `settings.py` uses `function_calling` for any `gpt-oss:*` model: the schema is sent as a tool, and the model answers with a tool call (`tests/test_settings.py`) |
+| Answering with a tool call | Not used | 54 of 67 recorded calls were proper tool calls. 13 had no tool call: 10 held valid JSON in the message text instead, and 3 held nothing usable | The chain keeps the raw reply (`include_raw=True`), and a last step, `_parse_function_calling_result`, checks the message text against the same Pydantic class (`tests/test_model_adapter.py`). The 3 unusable replies were rejected with a `503` |
+| Field names in the summary | Not seen | Sometimes names each item's text `area`, `action` or `question` instead of `text`. Seen in the real-model test chats, which aren't stored in `mlflow.db` | Only those three names are renamed to `text`, then the reply is checked again. Any other wrong field is still rejected (`tests/test_model_adapter.py`) |
+| An empty citation list | Not seen | Wrote it in a form Ollama's reply reader rejected | When no pages were found, the prompt asks for the placeholder ID `"none"`, and the code drops it |
+| Thinking before answering | Doesn't think first | Its thinking shares the 900-token output limit with its answer, and could use all of it | Reasoning effort is set to "low". Switching it off isn't supported |
+| Keeping to the question limit | Asked a fourth follow-up even though the prompt said not to | Not relied on | The code counts follow-ups and stops calling the model after three, for any model |
+
+**What the extra reading step saves.** The 10 recovered replies were 6 emergency checks, 2
+summaries, 1 follow-up question and 1 set of search queries. Without the step, each would have
+been a `503`. A failed emergency check fails the whole turn, so the 56 recorded turns would have
+had up to 15 failures instead of 5. The step reads a reply that has already arrived, so it costs
+no extra model call. It never changes what the model said: it only takes the JSON from the message
+text, or renames one of three known field names.
+
+**What isn't known.**
+
+- Why `json_schema` gives gpt-oss an empty reply. Only the symptom was recorded, from one call. A
+  newer Ollama may fix it. To re-test, have `structured_output_method` in `settings.py` return
+  `json_schema` for gpt-oss, then run `VETAI_RUN_OLLAMA_SMOKE=1 uv run pytest
+  tests/test_ollama_smoke.py -v -s`. If it passes, the extra reading step could go.
+- Whether llama3 would show the same habits under more use. Its 13 recorded calls all came from
+  one morning, with an older summary prompt.
+
+**Count it yourself.** This prints how each recorded chain call was read. Run it from the project
+folder with `uv run python`:
+
+```python
+from collections import Counter
+
+import mlflow
+
+mlflow.set_tracking_uri("sqlite:///mlflow.db")
+experiment = mlflow.get_experiment_by_name("vetai-chat")
+runs = mlflow.search_runs(experiment_ids=[experiment.experiment_id], output_format="list")
+model_of = {run.info.run_id: run.data.params["model"] for run in runs}
+counts = Counter()
+for trace in mlflow.search_traces(experiment_ids=[experiment.experiment_id], return_type="list"):
+    model = model_of[trace.info.request_metadata["mlflow.sourceRun"]]
+    spans = trace.data.spans
+    for chain in (s for s in spans if s.name == "RunnableSequence"):
+        steps = {s.name: s for s in spans if s.parent_id == chain.span_id}
+        if "ChatPromptTemplate" not in steps:
+            continue  # a step inside a chain, not a whole chain call
+        if "RunnableLambda" not in steps:  # no custom reading step: json_schema or plain tool call
+            form = "read by LangChain, " + chain.status.status_code
+        elif steps["RunnableLambda"].inputs["parsed"] is not None:
+            form = "tool call, read by LangChain"
+        elif steps["RunnableLambda"].status.status_code == "OK":
+            form = "no tool call, JSON in the text, recovered"
+        else:
+            form = "no tool call, nothing usable, rejected"
+        counts[(model, form)] += 1
+for (model, form), n in sorted(counts.items()):
+    print(f"{n:4d}  {model:15s} {form}")
+```
+
+On the recorded runs it prints the 54, 10 and 3 above for gpt-oss, and 13 successful llama3
+calls. It also shows the 6 gpt-oss calls made on 25 September, before the extra step existed: the
+1 failed `json_schema` call, and 5 tool calls that LangChain read without it.
 
 ## Web search
 

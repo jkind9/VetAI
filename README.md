@@ -17,6 +17,21 @@ It is built with:
 This is not a veterinary product. It does not diagnose, suggest medicines, or tell anyone their pet
 is fine.
 
+## How this meets the brief
+
+| The brief asks for | Where it is |
+| --- | --- |
+| A simple AI pet triage, using LangChain | Four LangChain chains ([`src/backend/model.py`](src/backend/model.py)), run in a fixed order by [`src/backend/workflow.py`](src/backend/workflow.py). See [The four model steps](#the-four-model-steps) |
+| Use LangChain to ask an LLM to ask questions | The follow-up chain writes one to three questions, based on the answers so far ([`prompts/adaptive_question.md`](prompts/adaptive_question.md)) |
+| Track the prompts, responses and timing in MLflow, as parameters and metrics | One MLflow run per message. The model and a fingerprint of each prompt file are parameters, and the turn's time is a metric. Each model call's exact prompt, reply and time are in the run's trace. See [See each turn in MLflow](#see-each-turn-in-mlflow) |
+| MLflow analysis | Turn times by model and reply, failures by step, and where the time goes inside a turn, with the scripts that produce them ([`src/mlflow_tracking/README.md`](src/mlflow_tracking/README.md#analyse-it)) |
+| A chat interface, in any form | A browser page and a desktop window, both using the same backend address ([`src/frontend/`](src/frontend/README.md)) |
+| Clear structure and a README to set it up; `requirements.txt` or `pyproject.toml` | [Quickstart](#quickstart), [Project layout](#project-layout), a README in each folder, and `pyproject.toml` with a lock file (`uv.lock`) |
+| A short note on design decisions | [Key decisions and why](#key-decisions-and-why) |
+
+Not done yet: scoring answer quality with a second model, and running the tests automatically on
+every push. Both are in [Future work](#future-work).
+
 ## Quickstart
 
 You need:
@@ -238,7 +253,12 @@ short search queries go out) and no API key is needed.
 **llama3 8B while building, gpt-oss:20b by default.** llama3 is quick, which made it good for
 building and testing the flow. gpt-oss:20b is slower and a 13 GB download, but gives more
 accurate answers, so it is the default. Any Ollama model can be set with
-`VETAI_OLLAMA_MODEL`, but only gpt-oss:20b has been checked end to end. For gpt-oss, the backend
+`VETAI_OLLAMA_MODEL`, but only gpt-oss:20b has been checked end to end. The two models also reply
+differently. Asked for plain JSON, gpt-oss gave an empty reply, so it is asked for a tool call
+instead. In 13 of 67 recorded calls it skipped the tool call; in 10 of those the JSON was in its
+message text, which the backend now reads, and the other 3 were rejected. The
+[backend README](src/backend/README.md#how-gpt-oss-and-llama3-behave-differently) has the details
+and a script that counts it from MLflow. For gpt-oss, the backend
 sets its reasoning effort to "low", so its thinking doesn't use up the space left for the answer.
 The backend also sets the model's context window (how much text it reads at once) to 16,384
 tokens. Ollama's default of about 2,000 silently cut the start off long summary prompts, removing
@@ -267,8 +287,8 @@ answer and the problem goes to the server log.
 | Citation check | When pages were found, every point in the summary cites one the app actually read | Every summary |
 | Test suite (`uv run pytest`) | The rules in code: emergency phrases, question order and limits, source checks, errors, MLflow recording. Uses a stand-in model | Any time, no model needed |
 | Browser test | Whole chats through the real page and backend, with a stand-in model | Any time, needs Node |
-| Emergency-check evaluation | The real model on 7 clear emergencies and 7 ordinary statements: all emergencies caught, no false alarms. Results saved to MLflow | Opt-in, needs Ollama |
-| Recorded real chats | Full chats with the real model and live search, checked against written rules and saved for a person to review | Opt-in, needs Ollama and network |
+| Emergency-check evaluation | The real model on 7 clear emergencies and 7 ordinary statements: all emergencies caught, no false alarms. The scores are logged as an MLflow run in the tests' throwaway database, and the test fails unless all 7 are caught with no false alarms | Opt-in, needs Ollama |
+| Recorded real chats | Full chats with the real model and live search, checked by code against written rules, then reviewed by a person | Opt-in, needs Ollama and network |
 
 Nothing yet uses a second model to grade the answers (often called "LLM as a judge"). That is in
 future work below.
@@ -282,6 +302,12 @@ future work below.
 - **The model's summary doesn't always pass the app's checks.** The owner then sees an error and
   can try again. Repeated real-model runs are recorded under
   `artifacts/live-journeys/`; see [`tests/README.md`](tests/README.md).
+- **Try again can't fix every failure.** The model runs at temperature 0 with a fixed seed, so the
+  same chat gets the same reply. Try again helps with passing faults, such as a timeout or a search
+  outage, but a reply the model always gets wrong fails again.
+- **A citation shows the page was read, not that it supports the sentence.** The app checks that
+  every cited page ID is a page it read. It doesn't check what the page says, and the model may add
+  general vet guidance that the cited page doesn't contain.
 - **The final step can outlast the screen's patience.** Both screens give up after 65 seconds.
   Search retries stop after 20 seconds to leave room for the summary, but a slow model can still
   run past the limit. The backend keeps working, and **Try again** starts the search again.
@@ -298,7 +324,8 @@ future work below.
 **Docker.** `Dockerfile` and `compose.yaml` show how the backend and Ollama could run in
 containers, but they are an untested example, not a deployment. To make them real: pin the Ollama
 image version, keep `mlflow.db` on a volume, test `docker compose up` automatically, and add a
-login and rate limits before exposing it anywhere.
+login and rate limits before exposing it anywhere. The image also serves the API only: it doesn't
+include the built browser page.
 
 **Interface fixes.**
 
@@ -327,6 +354,11 @@ only when someone runs them by hand.
 **More MLflow analysis.** Record the web search and page reading as their own step, add per-step
 timings as metrics, include the run ID in error replies, and add a small script that compares runs
 by model and prompt version.
+
+**Record every version on every run.** Each run records the model's name and the prompt
+fingerprints, but not the git commit, the model's digest (the exact build of its weights, which a
+re-download can change), the approved-site list or the other settings. Recording those would tie
+every result to the exact code and model that produced it.
 
 ## Project layout
 

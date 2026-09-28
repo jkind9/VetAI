@@ -54,8 +54,15 @@ Open http://127.0.0.1:5000 and choose `vetai-chat`.
 
 ## Analyse it
 
-This prints how long turns take for each model and kind of reply, and which steps fail and why.
-Run it from the project folder with `uv run python`:
+Two short scripts answer the main questions: how long a turn takes and what fails, and where the
+time goes inside a turn. The results below come from the 56 turns recorded while building the
+project (25 to 27 September 2026). `mlflow.db` isn't in the repository, because it holds what
+owners typed, so after your own chats the numbers will differ.
+
+### Turn times and failures
+
+This uses each run's parameters, metric and tags. Run it from the project folder with
+`uv run python`:
 
 ```python
 import mlflow
@@ -71,10 +78,79 @@ print(turns.groupby(["params.model", "tags.reply_kind"])["metrics.turn_seconds"]
 print(turns.groupby(["tags.failed_stage", "tags.failure_reason"]).size())
 ```
 
-On the runs recorded while building this project, it showed gpt-oss:20b answering questions in
-0.9 seconds (median) and 6.9 seconds at worst. It also showed that every failure so far was the
-model's reply not fitting the required shape (`invalid_model_output`), spread across the
-follow-up, emergency-check and summary steps.
+| Model | Reply | Turns | Median (s) | Slowest (s) |
+| --- | --- | ---: | ---: | ---: |
+| gpt-oss:20b | question | 37 | 1.9 | 41.0 |
+| gpt-oss:20b | emergency notice | 3 | 2.6 | 4.0 |
+| gpt-oss:20b | summary | 3 | 7.7 | 12.4 |
+| llama3 | question | 7 | 2.2 | 3.0 |
+| llama3 | summary | 1 | 12.3 | 12.3 |
+
+- **51 turns finished and 5 failed.** Every failure was a gpt-oss reply that didn't fit the
+  required shape (`invalid_model_output`): 3 in the follow-up step, 1 in the emergency check and 1
+  in the summary.
+- **The 41-second turn was the first message after 53 idle minutes.** Its emergency check alone
+  took 41 seconds for a short prompt, which fits Ollama loading the model back into memory. Other
+  gpt-oss question turns took 1.9 seconds (median).
+- **The two models aren't compared fairly here.** llama3 has only 8 turns, from one morning, made
+  with an older summary prompt.
+
+### Where the time goes
+
+This reads the traces, finds each model step by its prompt, and times it. It also works out how
+much of each final turn was spent outside the model, which is the web search and page downloads:
+
+```python
+import mlflow
+import pandas as pd
+
+mlflow.set_tracking_uri("sqlite:///mlflow.db")
+experiment = mlflow.get_experiment_by_name("vetai-chat")
+STEPS = {"emergency-sign classifier": "emergency_check", "AdaptiveDecision": "adaptive_question",
+         "SearchPlan": "search_query", "AssessmentDraft": "evidence_synthesis"}
+rows = []
+for trace in mlflow.search_traces(experiment_ids=[experiment.experiment_id], return_type="list"):
+    spans = trace.data.spans
+    turn = next(s for s in spans if s.name == "chat_turn")
+    for chain in (s for s in spans if s.name == "RunnableSequence"):
+        steps = {s.name: s for s in spans if s.parent_id == chain.span_id}
+        if "ChatPromptTemplate" not in steps:
+            continue  # a step inside a chain, not a whole chain call
+        prompt = str(steps["ChatPromptTemplate"].outputs)
+        step = next(name for marker, name in STEPS.items() if marker in prompt)
+        rows.append({"turn": turn.span_id, "step": step,
+                     "seconds": (chain.end_time_ns - chain.start_time_ns) / 1e9,
+                     "turn_seconds": (turn.end_time_ns - turn.start_time_ns) / 1e9,
+                     "reply": (turn.outputs or {}).get("kind")})
+calls = pd.DataFrame(rows)
+print(calls.groupby("step")["seconds"].describe()[["count", "50%", "max"]]
+      .join(calls.groupby("step")["seconds"].sum().rename("total")).round(2))
+final = calls[calls.reply == "assessment"].groupby("turn").agg(
+    model_seconds=("seconds", "sum"), turn_seconds=("turn_seconds", "first"))
+print("final turns: time outside model calls (search and page downloads), seconds")
+print((final.turn_seconds - final.model_seconds).describe()[["count", "50%", "max"]].round(1))
+```
+
+| Model step | Calls | Median (s) | Slowest (s) | Total (s) |
+| --- | ---: | ---: | ---: | ---: |
+| Emergency check | 55 | 0.73 | 40.84 | 129.3 |
+| Follow-up question | 21 | 0.53 | 5.82 | 27.2 |
+| Search queries | 5 | 0.62 | 0.77 | 2.9 |
+| Summary | 5 | 4.08 | 7.81 | 20.4 |
+
+- **The emergency check takes most of the model time:** 129 of 180 seconds (72%), or 64% without
+  the 41-second cold start. Each call is short, but it runs on every message. That is the price of
+  checking for emergencies first, every time.
+- **Web search and page downloads are the slowest part of the final turn:** about 5 seconds
+  (median; 7.2 at worst), against 4 seconds for the summary. They aren't traced as their own step
+  yet, so this is the turn's time minus its model calls.
+- **The summary prompt is the largest:** about 3,000 tokens of input (median), mostly page text.
+  This is why the model's context window had to be raised from Ollama's default of about 2,000
+  tokens (see the [backend README](../backend/README.md#the-four-model-steps)).
+
+The traces also show how each gpt-oss reply was read: as a proper tool call, or from JSON written
+in the message text instead. The script that counts this, and what it found, are in the
+[backend README](../backend/README.md#how-gpt-oss-and-llama3-behave-differently).
 
 ## Where the data goes
 

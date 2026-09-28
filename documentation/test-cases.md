@@ -246,6 +246,9 @@ the exact wording below, and answer every follow-up with "no".
 | J3 | 2 of 3 passed | gpt-oss:20b; both passing runs passed human review. The third hit a search-service outage: the app still returned a summary with the "search did not work" notice, but J3 requires real sources |
 | J4 | 3 of 3 passed | gpt-oss:20b; all three passed human review |
 
+The J3 and J4 records were first checked by an AI reviewer against the rules below. The project
+owner then reviewed each record against the same rules on 28 September 2026.
+
 ## Human review rules
 
 A real-model chat passes review only when:
